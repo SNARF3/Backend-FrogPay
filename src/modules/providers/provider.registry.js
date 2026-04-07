@@ -24,10 +24,20 @@ class ProviderRegistry {
 
 		return provider;
 	}
+
+	// 🔥 opcional pero útil para debugging/testing
+	list() {
+		return Array.from(this.providers.keys());
+	}
 }
 
 const providerRegistry = new ProviderRegistry();
+
+// 📦 Registro de providers
 providerRegistry.register('mock', mockProvider);
 providerRegistry.register('stripe', stripeProvider);
+
+// 👉 puedes agregar más aquí:
+// providerRegistry.register('paypal', paypalProvider);
 
 module.exports = providerRegistry;

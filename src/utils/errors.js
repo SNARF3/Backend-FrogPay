@@ -9,6 +9,7 @@ class AppError extends Error {
 	}
 }
 
+// 🧠 Errores de negocio (no reintentar)
 class BusinessError extends AppError {
 	constructor(message, options = {}) {
 		super(message, {
@@ -20,6 +21,7 @@ class BusinessError extends AppError {
 	}
 }
 
+// ⚙️ Errores técnicos (sí reintentar)
 class TechnicalError extends AppError {
 	constructor(message, options = {}) {
 		super(message, {
@@ -31,6 +33,39 @@ class TechnicalError extends AppError {
 	}
 }
 
+// 🚧 Método no implementado
+class NotImplementedError extends AppError {
+	constructor(methodName) {
+		super(`Method "${methodName}" is not implemented`, {
+			code: 'NOT_IMPLEMENTED',
+			statusCode: 501,
+			retryable: false,
+		});
+	}
+}
+
+// 🔌 Provider no registrado
+class ProviderNotFoundError extends BusinessError {
+	constructor(providerName) {
+		super(`Provider "${providerName}" is not registered`, {
+			code: 'PROVIDER_NOT_FOUND',
+			statusCode: 400,
+		});
+	}
+}
+
+// 💳 Pago fallido (puede mapearse desde providers)
+class PaymentFailedError extends BusinessError {
+	constructor(message, details = null) {
+		super(message || 'Pago fallido', {
+			code: 'PAYMENT_FAILED',
+			statusCode: 402,
+			details,
+		});
+	}
+}
+
+// 🔁 Helper para retry automático
 function isTechnicalError(error) {
 	if (!error) return false;
 
@@ -54,5 +89,8 @@ module.exports = {
 	AppError,
 	BusinessError,
 	TechnicalError,
+	NotImplementedError,
+	ProviderNotFoundError,
+	PaymentFailedError,
 	isTechnicalError,
 };
