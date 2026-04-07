@@ -3,23 +3,34 @@ const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 
 const registerTenant = async (req, res) => {
+    // Obtenemos una conexión exclusiva para hacer una transacción segura
     const client = await pool.connect();
 
     try {
-        const { nombre_empresa, correo_empresa, plan, password_admin } = req.body;
+        // Estos son los datos que nos enviará el Frontend (el React Modal)
+        const { nombre_empresa, correo_empresa, password_admin } = req.body;
 
-        await client.query('BEGIN');
+        await client.query('BEGIN'); // Iniciamos transacción
 
+        // 1. Generar la API Key y su Hash (para la máquina)
         const plainApiKey = 'fp_live_' + crypto.randomBytes(32).toString('hex');
         const hashedApiKey = crypto.createHash('sha256').update(plainApiKey).digest('hex');
 
+        // 2. Guardar la empresa
         const insertEmpresaQuery = `
             INSERT INTO empresas (nombre, correo, api_key, plan, estado) 
             VALUES ($1, $2, $3, $4, $5) RETURNING id;
         `;
-        const empresaResult = await client.query(insertEmpresaQuery, [nombre_empresa, correo_empresa, hashedApiKey, plan || 'freemium', 'activo']);
+        const empresaResult = await client.query(insertEmpresaQuery, [
+            nombre_empresa, 
+            correo_empresa, 
+            hashedApiKey, 
+            'freemium', 
+            'activo'
+        ]);
         const empresaId = empresaResult.rows[0].id;
 
+        // 3. Encriptar contraseña y guardar al usuario administrador (humano)
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password_admin, salt);
 
@@ -29,21 +40,25 @@ const registerTenant = async (req, res) => {
         `;
         await client.query(insertUsuarioQuery, [empresaId, correo_empresa, hashedPassword, 'admin']);
 
-        await client.query('COMMIT');
+        await client.query('COMMIT'); // Guardamos todo permanentemente
 
+        // 4. Respondemos al Frontend con éxito
         res.status(201).json({
-            mensaje: "Empresa registrada. Guarda tu API Key.",
+            mensaje: "Empresa registrada con éxito.",
             empresa_id: empresaId,
-            api_key: plainApiKey
+            api_key: plainApiKey // Enviamos la llave para que el Frontend la muestre
         });
 
     } catch (error) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK'); // Si algo falla, deshacemos todo
         console.error("Error en registerTenant:", error);
-        if (error.code === '23505') return res.status(400).json({ error: "Correo ya registrado." });
-        res.status(500).json({ error: "Error al registrar la empresa." });
+        
+        if (error.code === '23505') {
+            return res.status(400).json({ error: "Este correo ya está registrado en FrogPay." });
+        }
+        res.status(500).json({ error: "Error interno al registrar la empresa." });
     } finally {
-        client.release();
+        client.release(); // Devolvemos la conexión al pool
     }
 };
 

@@ -1,12 +1,11 @@
 const express = require('express');
-const routes = require('./routes/index'); // Llama al index de rutas
+const cors = require('cors'); 
+const routes = require('./routes/index'); 
 
 const app = express();
+app.use(cors()); 
 
-// Middlewares globales
 app.use(express.json());
-
-// Inyectar todas las rutas bajo el prefijo /api
 app.use('/api', routes);
 
 module.exports = app;
