@@ -1,33 +1,144 @@
-const registry = require('../providers/provider.registry');
-const { AppError } = require('../../utils/errors');
+const providerRegistry = require('../providers/provider.registry');
+const { executeWithRetry } = require('../../utils/retry');
+const { isTechnicalError, BusinessError, TechnicalError } = require('../../utils/errors');
+const paymentModel = require('./payment.model');
 
 class PaymentOrchestrator {
-  async processPayment({ provider, amount, currency, description }) {
-    try {
-      return await registry.getProvider(provider).charge({ amount, currency, description });
-    } catch (err) {
-      if (err instanceof AppError) throw err;
-      throw new AppError(err.message, 500);
-    }
-  }
+	async processPayment(context) {
+		const paymentId = context.payment.id;
+		const empresaId = context.empresaId;
+		const providerName = context.proveedor;
 
-  async processRefund({ provider, transactionId, amount }) {
-    try {
-      return await registry.getProvider(provider).refund(transactionId, amount);
-    } catch (err) {
-      if (err instanceof AppError) throw err;
-      throw new AppError(err.message, 500);
-    }
-  }
+		await paymentModel.updatePaymentStatus(paymentId, empresaId, 'PROCESSING');
 
-  async getPaymentStatus({ provider, transactionId }) {
-    try {
-      return await registry.getProvider(provider).getStatus(transactionId);
-    } catch (err) {
-      if (err instanceof AppError) throw err;
-      throw new AppError(err.message, 500);
-    }
-  }
+		await paymentModel.registerAuditEvent({
+			empresaId,
+			accion: 'PAYMENT_STATUS_CHANGED',
+			entidad: 'pago',
+			entidadId: paymentId,
+			metadata: {
+				from: 'INITIATED',
+				to: 'PROCESSING',
+				provider: providerName,
+			},
+		});
+
+		const provider = providerRegistry.resolve(providerName);
+
+		try {
+			const result = await executeWithRetry(
+				async () => provider.charge({
+					paymentId,
+					empresaId,
+					amount: context.payment.monto,
+					currency: context.payment.moneda,
+					token: context.token,
+					description: context.payment.descripcion,
+					metadata: context.metadata,
+				}),
+				{
+					maxRetries: 2,
+					shouldRetry: (error) => isTechnicalError(error),
+				}
+			);
+
+			await paymentModel.updatePaymentStatus(paymentId, empresaId, 'COMPLETED');
+
+			await paymentModel.insertTransaction({
+				pagoId: paymentId,
+				idTransaccionProveedor: result.providerTransactionId,
+				estado: 'COMPLETED',
+				codigoRespuesta: result.responseCode || '00',
+				mensajeRespuesta: result.message || 'Pago completado',
+			});
+
+			await paymentModel.registerAuditEvent({
+				empresaId,
+				accion: 'PAYMENT_STATUS_CHANGED',
+				entidad: 'pago',
+				entidadId: paymentId,
+				metadata: {
+					from: 'PROCESSING',
+					to: 'COMPLETED',
+					provider: providerName,
+					providerTransactionId: result.providerTransactionId,
+				},
+			});
+
+			return {
+				paymentId,
+				status: 'COMPLETED',
+				provider: providerName,
+				providerTransactionId: result.providerTransactionId,
+				message: result.message || 'Pago completado',
+			};
+		} catch (error) {
+			await paymentModel.updatePaymentStatus(paymentId, empresaId, 'FAILED');
+
+			await paymentModel.insertTransaction({
+				pagoId: paymentId,
+				idTransaccionProveedor: null,
+				estado: 'FAILED',
+				codigoRespuesta: error.code || 'PAYMENT_FAILED',
+				mensajeRespuesta: error.message || 'Pago fallido',
+			});
+
+			await paymentModel.registerAuditEvent({
+				empresaId,
+				accion: 'PAYMENT_STATUS_CHANGED',
+				entidad: 'pago',
+				entidadId: paymentId,
+				metadata: {
+					from: 'PROCESSING',
+					to: 'FAILED',
+					provider: providerName,
+					errorCode: error.code || 'PAYMENT_FAILED',
+					errorMessage: error.message,
+				},
+			});
+
+			if (error instanceof BusinessError) {
+				throw error;
+			}
+
+			throw new TechnicalError(error.message || 'Fallo técnico procesando pago', {
+				code: error.code || 'PAYMENT_TECHNICAL_FAILURE',
+				statusCode: error.statusCode || 502,
+			});
+		}
+	}
+
+	// 🔁 Refund (reintegrado)
+	async processRefund({ proveedor, transactionId, monto }) {
+		const provider = providerRegistry.resolve(proveedor);
+
+		try {
+			return await provider.refund(transactionId, monto);
+		} catch (error) {
+			if (error instanceof BusinessError) throw error;
+
+			throw new TechnicalError(error.message || 'Error en refund', {
+				code: error.code || 'REFUND_ERROR',
+				statusCode: error.statusCode || 500,
+			});
+		}
+	}
+
+	// 🔍 Status (reintegrado)
+	async getPaymentStatus({ proveedor, transactionId }) {
+		const provider = providerRegistry.resolve(proveedor);
+
+		try {
+			return await provider.getStatus(transactionId);
+		} catch (error) {
+			if (error instanceof BusinessError) throw error;
+
+			throw new TechnicalError(error.message || 'Error obteniendo estado', {
+				code: error.code || 'STATUS_ERROR',
+				statusCode: error.statusCode || 500,
+			});
+		}
+	}
 }
 
 module.exports = new PaymentOrchestrator();

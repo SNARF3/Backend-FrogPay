@@ -1,54 +1,155 @@
-const orchestrator = require('./payment.orchestrator');
+const paymentModel = require('./payment.model');
+const paymentOrchestrator = require('./payment.orchestrator');
+const { BusinessError } = require('../../utils/errors');
 const logger = require('../../utils/logger');
 
+function validatePayload(body) {
+	if (!body) return 'Payload inválido';
+	if (!body.monto || Number(body.monto) <= 0) return 'El campo monto debe ser mayor a 0';
+	if (!body.moneda) return 'El campo moneda es obligatorio';
+	return null;
+}
+
 async function createPayment(req, res) {
-  const { provider, amount, currency, description } = req.body;
+	try {
+		const validationError = validatePayload(req.body);
+		if (validationError) {
+			return res.status(400).json({ error: validationError });
+		}
 
-  if (!provider || !amount || !currency) {
-    return res.status(400).json({ error: 'provider, amount, and currency are required' });
-  }
+		const empresaId = req.empresaId;
+		const proveedor = req.body.proveedor || 'mock';
+		const claveIdempotencia = req.body.clave_idempotencia || null;
 
-  try {
-    const result = await orchestrator.processPayment({ provider, amount, currency, description });
-    return res.status(201).json(result);
-  } catch (err) {
-    logger.error(`createPayment: ${err.message}`);
-    return res.status(err.statusCode || 500).json({ error: err.message });
-  }
+		// 🔁 Idempotencia
+		if (claveIdempotencia) {
+			const existingPayment = await paymentModel.findByIdempotency(
+				empresaId,
+				claveIdempotencia
+			);
+
+			if (existingPayment) {
+				return res.status(200).json({
+					payment_id: existingPayment.id,
+					estado: existingPayment.estado,
+					proveedor: existingPayment.proveedor,
+					idempotent_replay: true,
+				});
+			}
+		}
+
+		// 💾 Crear pago
+		const payment = await paymentModel.createPayment({
+			empresaId,
+			monto: req.body.monto,
+			moneda: req.body.moneda,
+			estado: 'INITIATED',
+			proveedor,
+			claveIdempotencia,
+			descripcion: req.body.descripcion,
+		});
+
+		// 🧾 Auditoría
+		await paymentModel.registerAuditEvent({
+			empresaId,
+			accion: 'PAYMENT_STATUS_CHANGED',
+			entidad: 'pago',
+			entidadId: payment.id,
+			metadata: {
+				from: null,
+				to: 'INITIATED',
+				provider: proveedor,
+			},
+		});
+
+		// ⚙️ Orquestador
+		const result = await paymentOrchestrator.processPayment({
+			empresaId,
+			proveedor,
+			payment,
+			token: req.body.token,
+			metadata: req.body.metadata || {},
+		});
+
+		return res.status(201).json({
+			payment_id: result.paymentId,
+			estado: result.status,
+			proveedor: result.provider,
+			id_transaccion_proveedor: result.providerTransactionId,
+			mensaje: result.message,
+		});
+	} catch (error) {
+		logger.error(`createPayment: ${error.message}`);
+
+		if (error instanceof BusinessError) {
+			return res.status(error.statusCode).json({
+				error: error.message,
+				code: error.code,
+			});
+		}
+
+		return res.status(error.statusCode || 500).json({
+			error: error.message || 'Error interno al procesar el pago',
+			code: error.code || 'INTERNAL_ERROR',
+		});
+	}
 }
 
 async function refundPayment(req, res) {
-  const { transactionId } = req.params;
-  const { provider, amount } = req.body;
+	const { transactionId } = req.params;
+	const { proveedor, monto } = req.body;
 
-  if (!provider || !transactionId) {
-    return res.status(400).json({ error: 'provider and transactionId are required' });
-  }
+	if (!proveedor || !transactionId) {
+		return res.status(400).json({
+			error: 'proveedor y transactionId son requeridos',
+		});
+	}
 
-  try {
-    const result = await orchestrator.processRefund({ provider, transactionId, amount });
-    return res.status(200).json(result);
-  } catch (err) {
-    logger.error(`refundPayment: ${err.message}`);
-    return res.status(err.statusCode || 500).json({ error: err.message });
-  }
+	try {
+		const result = await paymentOrchestrator.processRefund({
+			proveedor,
+			transactionId,
+			monto,
+		});
+
+		return res.status(200).json(result);
+	} catch (error) {
+		logger.error(`refundPayment: ${error.message}`);
+
+		return res.status(error.statusCode || 500).json({
+			error: error.message,
+		});
+	}
 }
 
 async function getPaymentStatus(req, res) {
-  const { transactionId } = req.params;
-  const { provider } = req.query;
+	const { transactionId } = req.params;
+	const { proveedor } = req.query;
 
-  if (!provider || !transactionId) {
-    return res.status(400).json({ error: 'provider and transactionId are required' });
-  }
+	if (!proveedor || !transactionId) {
+		return res.status(400).json({
+			error: 'proveedor y transactionId son requeridos',
+		});
+	}
 
-  try {
-    const result = await orchestrator.getPaymentStatus({ provider, transactionId });
-    return res.status(200).json(result);
-  } catch (err) {
-    logger.error(`getPaymentStatus: ${err.message}`);
-    return res.status(err.statusCode || 500).json({ error: err.message });
-  }
+	try {
+		const result = await paymentOrchestrator.getPaymentStatus({
+			proveedor,
+			transactionId,
+		});
+
+		return res.status(200).json(result);
+	} catch (error) {
+		logger.error(`getPaymentStatus: ${error.message}`);
+
+		return res.status(error.statusCode || 500).json({
+			error: error.message,
+		});
+	}
 }
 
-module.exports = { createPayment, refundPayment, getPaymentStatus };
+module.exports = {
+	createPayment,
+	refundPayment,
+	getPaymentStatus,
+};

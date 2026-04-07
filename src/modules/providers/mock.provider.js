@@ -1,19 +1,52 @@
 const { randomUUID } = require('crypto');
-const PaymentProvider = require('./provider.interface');
+const { PaymentProvider } = require('./provider.interface');
+const { BusinessError, TechnicalError } = require('../../utils/errors');
 
 class MockProvider extends PaymentProvider {
-  async charge(payload) {
-    const transactionId = randomUUID();
-    return { success: true, transactionId, status: 'COMPLETED', raw: {} };
-  }
+	async charge(paymentData) {
+		const metadata = paymentData.metadata || {};
 
-  async refund(transactionId, amount) {
-    return { success: true, refundId: randomUUID(), status: 'REFUNDED' };
-  }
+		// 🔥 Simulación de error técnico
+		if (metadata.forceTechnicalError) {
+			throw new TechnicalError('Mock provider timeout', {
+				code: 'PROVIDER_TIMEOUT',
+				statusCode: 504,
+			});
+		}
 
-  async getStatus(transactionId) {
-    return { success: true, transactionId, status: 'COMPLETED' };
-  }
+		// 💸 Simulación de error de negocio
+		if (
+			metadata.forceInsufficientFunds ||
+			Number(paymentData.amount) > 1000000
+		) {
+			throw new BusinessError('Fondos insuficientes', {
+				code: 'INSUFFICIENT_FUNDS',
+				statusCode: 402,
+			});
+		}
+
+		return {
+			providerTransactionId: `mock_${randomUUID()}`,
+			status: 'COMPLETED',
+			responseCode: '00',
+			message: 'Pago aprobado por MockProvider',
+		};
+	}
+
+	async refund({ transactionId, amount }) {
+		return {
+			providerRefundId: `mock_refund_${randomUUID()}`,
+			status: 'COMPLETED',
+			message: `Reembolso simulado para ${transactionId}`,
+		};
+	}
+
+	async getStatus(transactionId) {
+		return {
+			providerTransactionId: transactionId,
+			status: 'COMPLETED',
+		};
+	}
 }
 
-module.exports = MockProvider;
+module.exports = new MockProvider();
