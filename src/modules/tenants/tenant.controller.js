@@ -1,7 +1,7 @@
 const pool = require('../../config/database');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
-
+const { loginEmpresa } = require('./tenant.service');
 const registerTenant = async (req, res) => {
     // Obtenemos una conexión exclusiva para hacer una transacción segura
     const client = await pool.connect();
@@ -62,4 +62,32 @@ const registerTenant = async (req, res) => {
     }
 };
 
-module.exports = { registerTenant };
+
+const loginTenant = async (req, res) => {
+    try {
+        const { correo, password } = req.body;
+
+        if (!correo || !password) {
+            return res.status(400).json({
+                error: "Correo y contraseña son obligatorios"
+            });
+        }
+
+        const result = await loginEmpresa(correo, password);
+
+        res.status(200).json({
+            mensaje: "Login exitoso",
+            ...result
+        });
+
+    } catch (error) {
+        console.error("loginTenant:", error.message);
+
+        res.status(401).json({
+            error: error.message
+        });
+    }
+};
+
+
+module.exports = { registerTenant , loginTenant};
