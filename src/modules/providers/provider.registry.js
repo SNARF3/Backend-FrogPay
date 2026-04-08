@@ -1,5 +1,5 @@
 const mockProvider = require('./mock.provider');
-const stripeProvider = require('./stripe.provider');
+const paypalProvider = require('./paypal.provider');
 const { BusinessError } = require('../../utils/errors');
 
 class ProviderRegistry {
@@ -35,9 +35,6 @@ const providerRegistry = new ProviderRegistry();
 
 // 📦 Registro de providers
 providerRegistry.register('mock', mockProvider);
-providerRegistry.register('stripe', stripeProvider);
-
-// 👉 puedes agregar más aquí:
-// providerRegistry.register('paypal', paypalProvider);
+providerRegistry.register('paypal', paypalProvider);
 
 module.exports = providerRegistry;
