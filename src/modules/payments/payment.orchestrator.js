@@ -2,6 +2,7 @@ const providerRegistry = require('../providers/provider.registry');
 const { executeWithRetry } = require('../../utils/retry');
 const { isTechnicalError, BusinessError, TechnicalError } = require('../../utils/errors');
 const paymentModel = require('./payment.model');
+const auditLogger = require('../../utils/auditLogger');
 
 class PaymentOrchestrator {
 	async processPayment(context) {
@@ -11,16 +12,12 @@ class PaymentOrchestrator {
 
 		await paymentModel.updatePaymentStatus(paymentId, empresaId, 'PROCESSING');
 
-		await paymentModel.registerAuditEvent({
+		await auditLogger.recordPaymentEvent({
 			empresaId,
-			accion: 'PAYMENT_STATUS_CHANGED',
-			entidad: 'pago',
-			entidadId: paymentId,
-			metadata: {
-				from: 'INITIATED',
-				to: 'PROCESSING',
-				provider: providerName,
-			},
+			paymentId,
+			from: 'INITIATED',
+			to: 'PROCESSING',
+			provider: providerName,
 		});
 
 		const provider = providerRegistry.resolve(providerName);
@@ -42,34 +39,32 @@ class PaymentOrchestrator {
 				}
 			);
 
+			const providerTransactionId = result.providerTransactionId || result.transactionId || result.id || null;
+
 			await paymentModel.updatePaymentStatus(paymentId, empresaId, 'COMPLETED');
 
 			await paymentModel.insertTransaction({
 				pagoId: paymentId,
-				idTransaccionProveedor: result.providerTransactionId,
+				idTransaccionProveedor: providerTransactionId,
 				estado: 'COMPLETED',
 				codigoRespuesta: result.responseCode || '00',
 				mensajeRespuesta: result.message || 'Pago completado',
 			});
 
-			await paymentModel.registerAuditEvent({
+			await auditLogger.recordPaymentEvent({
 				empresaId,
-				accion: 'PAYMENT_STATUS_CHANGED',
-				entidad: 'pago',
-				entidadId: paymentId,
-				metadata: {
-					from: 'PROCESSING',
-					to: 'COMPLETED',
-					provider: providerName,
-					providerTransactionId: result.providerTransactionId,
-				},
+				paymentId,
+				from: 'PROCESSING',
+				to: 'COMPLETED',
+				provider: providerName,
+				providerTransactionId,
 			});
 
 			return {
 				paymentId,
 				status: 'COMPLETED',
 				provider: providerName,
-				providerTransactionId: result.providerTransactionId,
+				providerTransactionId,
 				message: result.message || 'Pago completado',
 			};
 		} catch (error) {
@@ -83,18 +78,14 @@ class PaymentOrchestrator {
 				mensajeRespuesta: error.message || 'Pago fallido',
 			});
 
-			await paymentModel.registerAuditEvent({
+			await auditLogger.recordPaymentEvent({
 				empresaId,
-				accion: 'PAYMENT_STATUS_CHANGED',
-				entidad: 'pago',
-				entidadId: paymentId,
-				metadata: {
-					from: 'PROCESSING',
-					to: 'FAILED',
-					provider: providerName,
-					errorCode: error.code || 'PAYMENT_FAILED',
-					errorMessage: error.message,
-				},
+				paymentId,
+				from: 'PROCESSING',
+				to: 'FAILED',
+				provider: providerName,
+				errorCode: error.code || 'PAYMENT_FAILED',
+				errorMessage: error.message,
 			});
 
 			if (error instanceof BusinessError) {
