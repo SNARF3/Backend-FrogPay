@@ -2,18 +2,43 @@ const orchestrator = require('./payment.orchestrator');
 const logger = require('../../utils/logger');
 
 async function createPayment(req, res) {
-  const { provider, amount, currency, description } = req.body;
+  const {
+    provider,
+    amount, monto,
+    currency, moneda,
+    description, descripcion,
+    cardNumber,
+  } = req.body;
 
-  if (!provider || !amount || !currency) {
-    return res.status(400).json({ error: 'provider, amount, and currency are required' });
+  const resolvedAmount   = amount   ?? monto;
+  const resolvedCurrency = currency ?? moneda;
+  const resolvedDesc     = description ?? descripcion;
+
+  if (!provider || !resolvedAmount || !resolvedCurrency) {
+    return res.status(400).json({ error: 'provider, amount y currency son requeridos' });
   }
 
   try {
-    const result = await orchestrator.processPayment({ provider, amount, currency, description });
-    return res.status(201).json(result);
+    const result = await orchestrator.processPayment({
+      provider,
+      amount: resolvedAmount,
+      currency: resolvedCurrency,
+      description: resolvedDesc,
+      cardNumber,
+    });
+    return res.status(201).json({
+      ...result,
+      payment_id: result.transactionId,
+      estado: result.status,
+      mensaje: 'Pago procesado exitosamente',
+    });
   } catch (err) {
     logger.error(`createPayment: ${err.message}`);
-    return res.status(err.statusCode || 500).json({ error: err.message });
+    return res.status(err.statusCode || 500).json({
+      error: err.message,
+      estado: 'FAILED',
+      raw: err.raw || null,
+    });
   }
 }
 
@@ -51,4 +76,49 @@ async function getPaymentStatus(req, res) {
   }
 }
 
-module.exports = { createPayment, refundPayment, getPaymentStatus };
+async function createPaypalOrder(req, res) {
+  const { amount, currency, description } = req.body;
+
+  if (!amount || !currency) {
+    return res.status(400).json({ error: 'amount y currency son requeridos' });
+  }
+
+  try {
+    const registry = require('../providers/provider.registry');
+    const paypal = registry.getProvider('paypal');
+    const result = await paypal.createOrder({
+      amount: parseFloat(amount),
+      currency,
+      description: description || 'Pago FrogPay',
+    });
+    return res.status(201).json(result);
+  } catch (err) {
+    logger.error(`createPaypalOrder: ${err.message}`);
+    return res.status(err.statusCode || 500).json({ error: err.message, raw: err.raw });
+  }
+}
+
+async function capturePaypalOrder(req, res) {
+  const { orderId } = req.body;
+
+  if (!orderId) {
+    return res.status(400).json({ error: 'orderId es requerido' });
+  }
+
+  try {
+    const registry = require('../providers/provider.registry');
+    const paypal = registry.getProvider('paypal');
+    const result = await paypal.captureOrder(orderId);
+    return res.status(200).json({
+      ...result,
+      payment_id: result.transactionId,
+      estado: result.status,
+      mensaje: 'Pago capturado exitosamente',
+    });
+  } catch (err) {
+    logger.error(`capturePaypalOrder: ${err.message}`);
+    return res.status(err.statusCode || 500).json({ error: err.message, raw: err.raw });
+  }
+}
+
+module.exports = { createPayment, refundPayment, getPaymentStatus, createPaypalOrder, capturePaypalOrder };

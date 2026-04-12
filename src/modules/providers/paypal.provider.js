@@ -26,6 +26,72 @@ class PayPalProvider extends PaymentProvider {
     return data.access_token;
   }
 
+  // Paso 1: crea la orden y devuelve la URL de aprobación
+  async createOrder(payload) {
+    const { amount, currency, description } = payload;
+    const accessToken = await this._getAccessToken();
+
+    const createRes = await fetch(`${env.PAYPAL_BASE_URL}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [
+          {
+            description,
+            amount: { currency_code: currency, value: String(amount) },
+          },
+        ],
+        application_context: {
+          return_url: 'http://localhost:5173/checkout',
+          cancel_url: 'http://localhost:5173/checkout',
+          user_action: 'PAY_NOW',
+        },
+      }),
+    });
+
+    const order = await createRes.json();
+
+    if (!createRes.ok) {
+      throw new PaymentFailedError('Failed to create PayPal order', order);
+    }
+
+    const approvalUrl = order.links?.find((l) => l.rel === 'approve')?.href;
+
+    return {
+      orderId: order.id,
+      approvalUrl,
+      status: order.status,
+    };
+  }
+
+  // Paso 2: captura la orden ya aprobada por el usuario
+  async captureOrder(orderId) {
+    const accessToken = await this._getAccessToken();
+
+    const captureRes = await fetch(
+      `${env.PAYPAL_BASE_URL}/v2/checkout/orders/${orderId}/capture`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const captured = await captureRes.json();
+
+    if (!captureRes.ok) {
+      throw new PaymentFailedError('Failed to capture PayPal order', captured);
+    }
+
+    return { success: true, transactionId: orderId, status: 'COMPLETED', raw: captured };
+  }
+
   async charge(payload) {
     const { amount, currency, description } = payload;
     const accessToken = await this._getAccessToken();
