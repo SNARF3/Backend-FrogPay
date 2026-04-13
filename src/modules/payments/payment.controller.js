@@ -177,7 +177,6 @@ async function getPaymentStatus(req, res) {
 }
 
 // 💳 Endpoint para validar, tokenizar y guardar tarjetas usando el Model
-// 💳 Endpoint para validar, tokenizar y guardar tarjetas usando el Model
 async function registerCard(req, res) {
     try {
         const { cardType, cardholder, cardNumber, expiry, cvc } = req.body;
