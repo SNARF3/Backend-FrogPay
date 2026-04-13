@@ -1,6 +1,37 @@
-const PaymentProvider = require('./provider.interface');
-const { PaymentFailedError } = require('../../utils/errors');
+const { PaymentProvider } = require('./provider.interface');
+const { PaymentFailedError, TechnicalError } = require('../../utils/errors');
 const env = require('../../config/env');
+
+function isTechnicalStatus(status) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+async function readJsonSafe(response) {
+  try {
+    return await response.json();
+  } catch (_error) {
+    return null;
+  }
+}
+
+function buildError(operation, response, data) {
+  const payload = data || {};
+  const message = payload.error_description || payload.message || payload.name || `PayPal ${operation} failed`;
+
+  if (isTechnicalStatus(response.status)) {
+    return new TechnicalError(message, {
+      code: 'PAYPAL_TECHNICAL_ERROR',
+      statusCode: response.status || 503,
+      details: payload,
+    });
+  }
+
+  return new PaymentFailedError(message, payload);
+}
+
+function hasIssue(data, issueCode) {
+  return Array.isArray(data?.details) && data.details.some((detail) => detail?.issue === issueCode);
+}
 
 class PayPalProvider extends PaymentProvider {
   async _getAccessToken() {
@@ -17,10 +48,10 @@ class PayPalProvider extends PaymentProvider {
       body: 'grant_type=client_credentials',
     });
 
-    const data = await response.json();
+    const data = await readJsonSafe(response);
 
     if (!response.ok) {
-      throw new PaymentFailedError('Failed to obtain PayPal access token', data);
+      throw buildError('obtain access token', response, data);
     }
 
     return data.access_token;
@@ -113,10 +144,10 @@ class PayPalProvider extends PaymentProvider {
       }),
     });
 
-    const order = await createRes.json();
+    const order = await readJsonSafe(createRes);
 
     if (!createRes.ok) {
-      throw new PaymentFailedError('Failed to create PayPal order', order);
+      throw buildError('create PayPal order', createRes, order);
     }
 
     const orderId = order.id;
@@ -132,13 +163,31 @@ class PayPalProvider extends PaymentProvider {
       }
     );
 
-    const captured = await captureRes.json();
+    const captured = await readJsonSafe(captureRes);
 
     if (!captureRes.ok) {
-      throw new PaymentFailedError('Failed to capture PayPal order', captured);
+      if (
+        process.env.PAYPAL_DEV_SIMULATE_SUCCESS === 'true' &&
+        hasIssue(captured, 'ORDER_NOT_APPROVED')
+      ) {
+        return {
+          success: true,
+          providerTransactionId: orderId,
+          status: 'COMPLETED',
+          responseCode: 'PAYPAL_SANDBOX_SIMULATION',
+          message: 'Pago completado en modo developer (sandbox sin aprobacion de comprador).',
+          raw: {
+            simulated: true,
+            order,
+            captureError: captured,
+          },
+        };
+      }
+
+      throw buildError('capture PayPal order', captureRes, captured);
     }
 
-    return { success: true, transactionId: orderId, status: 'COMPLETED', raw: captured };
+    return { success: true, providerTransactionId: orderId, status: 'COMPLETED', message: 'Pago completado con PayPal', raw: captured };
   }
 
   async refund(transactionId, amount) {
@@ -151,10 +200,10 @@ class PayPalProvider extends PaymentProvider {
       }
     );
 
-    const order = await orderRes.json();
+    const order = await readJsonSafe(orderRes);
 
     if (!orderRes.ok) {
-      throw new PaymentFailedError('Failed to retrieve PayPal order for refund', order);
+      throw buildError('retrieve PayPal order for refund', orderRes, order);
     }
 
     const captureId =
@@ -181,10 +230,10 @@ class PayPalProvider extends PaymentProvider {
     const refund = await refundRes.json();
 
     if (!refundRes.ok) {
-      throw new PaymentFailedError('Failed to refund PayPal payment', refund);
+      throw buildError('refund PayPal payment', refundRes, refund);
     }
 
-    return { success: true, refundId: refund.id, status: 'REFUNDED', raw: refund };
+    return { success: true, providerRefundId: refund.id, status: 'REFUNDED', raw: refund };
   }
 
   async getStatus(transactionId) {
@@ -197,14 +246,14 @@ class PayPalProvider extends PaymentProvider {
       }
     );
 
-    const data = await res.json();
+    const data = await readJsonSafe(res);
 
     if (!res.ok) {
-      throw new PaymentFailedError('Failed to get PayPal order status', data);
+      throw buildError('get PayPal order status', res, data);
     }
 
-    return { success: true, transactionId, status: data.status, raw: data };
+    return { success: true, providerTransactionId: transactionId, status: data.status, raw: data };
   }
 }
 
-module.exports = PayPalProvider;
+module.exports = new PayPalProvider();

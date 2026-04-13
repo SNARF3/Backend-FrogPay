@@ -1,26 +1,42 @@
-const { ProviderNotFoundError } = require('../../utils/errors');
-const PayPalProvider = require('./paypal.provider');
-const MockProvider = require('./mock.provider');
+const mockProvider = require('./mock.provider');
+const paypalProvider = require('./paypal.provider');
+const cardProvider = require('./card.provider');
+const { BusinessError } = require('../../utils/errors');
 
 class ProviderRegistry {
-  constructor() {
-    this._providers = new Map();
-  }
+	constructor() {
+		this.providers = new Map();
+	}
 
-  register(name, instance) {
-    this._providers.set(name, instance);
-  }
+	register(name, provider) {
+		this.providers.set(String(name).toLowerCase(), provider);
+	}
 
-  getProvider(name) {
-    if (!this._providers.has(name)) {
-      throw new ProviderNotFoundError(name);
-    }
-    return this._providers.get(name);
-  }
+	resolve(name = 'mock') {
+		const key = String(name).toLowerCase();
+		const provider = this.providers.get(key);
+
+		if (!provider) {
+			throw new BusinessError(`Proveedor no soportado: ${name}`, {
+				code: 'UNSUPPORTED_PROVIDER',
+				statusCode: 400,
+			});
+		}
+
+		return provider;
+	}
+
+	// 🔥 opcional pero útil para debugging/testing
+	list() {
+		return Array.from(this.providers.keys());
+	}
 }
 
-const registry = new ProviderRegistry();
-registry.register('paypal', new PayPalProvider());
-registry.register('mock', new MockProvider());
+const providerRegistry = new ProviderRegistry();
 
-module.exports = registry;
+// 📦 Registro de providers
+providerRegistry.register('mock', mockProvider);
+providerRegistry.register('paypal', paypalProvider);
+providerRegistry.register('card', cardProvider);
+
+module.exports = providerRegistry;

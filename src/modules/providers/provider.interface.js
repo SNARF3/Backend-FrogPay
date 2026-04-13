@@ -1,17 +1,19 @@
 const { NotImplementedError } = require('../../utils/errors');
 
 class PaymentProvider {
-  async charge(payload) {
-    throw new NotImplementedError('charge');
-  }
+	async charge(_paymentData) {
+		throw new NotImplementedError('charge');
+	}
 
-  async refund(transactionId, amount) {
-    throw new NotImplementedError('refund');
-  }
+	async refund(_refundData) {
+		throw new NotImplementedError('refund');
+	}
 
-  async getStatus(transactionId) {
-    throw new NotImplementedError('getStatus');
-  }
+	async getStatus(_transactionId) {
+		throw new NotImplementedError('getStatus');
+	}
 }
 
-module.exports = PaymentProvider;
+module.exports = {
+	PaymentProvider,
+};
