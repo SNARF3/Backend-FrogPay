@@ -1,12 +1,27 @@
 const express = require('express');
 const router = express.Router();
-const { createPayment, refundPayment, getPaymentStatus, createPaypalOrder, capturePaypalOrder } = require('../modules/payments/payment.controller');
+const { authMiddleware } = require('../middlewares/auth.middleware');
+const {
+    createPayment,
+    refundPayment,
+    getPaymentStatus,
+    registerCard,
+    getCards,
+} = require('../modules/payments/payment.controller');
 
-router.get('/health-check', (_req, res) => res.json({ ok: true }));
-router.post('/paypal/create-order', createPaypalOrder);
-router.post('/paypal/capture-order', capturePaypalOrder);
-router.post('/', createPayment);
-router.post('/:transactionId/refund', refundPayment);
-router.get('/:transactionId/status', getPaymentStatus);
+// 📌 Registrar tarjeta (PROTEGIDO)
+router.post('/cards', authMiddleware, registerCard);
+
+// 📌 Listar tarjetas de la empresa (PROTEGIDO)
+router.get('/cards', authMiddleware, getCards);
+
+// 📌 Crear pago
+router.post('/', authMiddleware, createPayment);
+
+// 📌 Reembolso
+router.post('/:transactionId/refund', authMiddleware, refundPayment);
+
+// 📌 Estado del pago
+router.get('/:transactionId/status', authMiddleware, getPaymentStatus);
 
 module.exports = router;
