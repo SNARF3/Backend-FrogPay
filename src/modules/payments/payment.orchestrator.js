@@ -3,6 +3,11 @@ const { executeWithRetry } = require('../../utils/retry');
 const { isTechnicalError, BusinessError, TechnicalError } = require('../../utils/errors');
 const paymentModel = require('./payment.model');
 const auditLogger = require('../../utils/auditLogger');
+const providerRegistry = require('../providers/provider.registry');
+const { executeWithRetry } = require('../../utils/retry');
+const { isTechnicalError, BusinessError, TechnicalError } = require('../../utils/errors');
+const paymentModel = require('./payment.model');
+const auditLogger = require('../../utils/auditLogger');
 
 class PaymentOrchestrator {
 	async processPayment(context) {

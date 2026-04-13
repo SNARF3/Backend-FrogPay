@@ -4,6 +4,12 @@ const paymentOrchestrator = require('./payment.orchestrator');
 const { BusinessError } = require('../../utils/errors');
 const env = require('../../config/env');
 const auditLogger = require('../../utils/auditLogger');
+const paymentModel = require('./payment.model');
+const cardModel = require('./card.model');
+const paymentOrchestrator = require('./payment.orchestrator');
+const { BusinessError } = require('../../utils/errors');
+const env = require('../../config/env');
+const auditLogger = require('../../utils/auditLogger');
 const logger = require('../../utils/logger');
 const pool = require('../../config/database');
 
@@ -123,6 +129,9 @@ async function createPayment(req, res) {
 }
 
 async function refundPayment(req, res) {
+    const { transactionId } = req.params;
+    const proveedor = req.body.proveedor || req.body.provider || env.DEFAULT_PROVIDER || 'paypal';
+    const { monto } = req.body;
     const { transactionId } = req.params;
     const proveedor = req.body.proveedor || req.body.provider || env.DEFAULT_PROVIDER || 'paypal';
     const { monto } = req.body;
