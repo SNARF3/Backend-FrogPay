@@ -145,10 +145,29 @@ async function registerAuditEvent(data) {
 	}
 }
 
+async function getCardsByEmpresa(empresaId) {
+    const query = `
+        SELECT 
+            id, 
+            ultimos_cuatro, 
+            red, 
+            tipo, 
+            creado_en 
+        FROM tarjetas 
+        WHERE empresa_id = $1 
+        ORDER BY creado_en DESC;
+    `;
+    
+    // Asumiendo que 'pool' está disponible en el scope del archivo
+    const { rows } = await pool.query(query, [empresaId]);
+    return rows;
+}
+
 module.exports = {
 	findByIdempotency,
 	createPayment,
 	updatePaymentStatus,
 	insertTransaction,
 	registerAuditEvent,
+	getCardsByEmpresa,
 };
