@@ -78,27 +78,71 @@ async function insertTransaction(data) {
 }
 
 async function registerAuditEvent(data) {
-	const query = `
-		INSERT INTO auditoria (
-			empresa_id,
-			accion,
-			entidad,
-			entidad_id,
-			metadata
-		) VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, empresa_id, accion, entidad, entidad_id, metadata, creado_en;
-	`;
-
 	const values = [
 		data.empresaId,
-		data.accion,
-		data.entidad,
-		data.entidadId,
+		data.paymentId || data.entidadId,
+		data.from || null,
+		data.to || null,
+		data.provider || null,
+		data.providerTransactionId || null,
+		data.errorCode || null,
+		data.errorMessage || null,
 		JSON.stringify(data.metadata || {}),
 	];
 
-	const { rows } = await pool.query(query, values);
-	return rows[0];
+	const paymentEventsQuery = `
+		INSERT INTO payment_events (
+			empresa_id,
+			payment_id,
+			from_state,
+			to_state,
+			provider,
+			provider_transaction_id,
+			error_code,
+			error_message,
+			metadata
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, empresa_id, payment_id, from_state, to_state, provider, provider_transaction_id, error_code, error_message, metadata, creado_en;
+	`;
+
+	try {
+		const { rows } = await pool.query(paymentEventsQuery, values);
+		return rows[0];
+	} catch (error) {
+		if (error.code !== '42P01') {
+			throw error;
+		}
+
+		const fallbackQuery = `
+			INSERT INTO auditoria (
+				empresa_id,
+				accion,
+				entidad,
+				entidad_id,
+				metadata
+			) VALUES ($1, $2, $3, $4, $5)
+			RETURNING id, empresa_id, accion, entidad, entidad_id, metadata, creado_en;
+		`;
+
+		const fallbackValues = [
+			data.empresaId,
+			'PAYMENT_STATUS_CHANGED',
+			'pago',
+			data.paymentId || data.entidadId,
+			JSON.stringify({
+				from: data.from || null,
+				to: data.to || null,
+				provider: data.provider || null,
+				providerTransactionId: data.providerTransactionId || null,
+				errorCode: data.errorCode || null,
+				errorMessage: data.errorMessage || null,
+				...(data.metadata || {}),
+			}),
+		];
+
+		const { rows } = await pool.query(fallbackQuery, fallbackValues);
+		return rows[0];
+	}
 }
 
 module.exports = {

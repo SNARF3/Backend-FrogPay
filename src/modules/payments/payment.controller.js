@@ -1,12 +1,16 @@
 const paymentModel = require('./payment.model');
 const paymentOrchestrator = require('./payment.orchestrator');
 const { BusinessError } = require('../../utils/errors');
+const env = require('../../config/env');
+const auditLogger = require('../../utils/auditLogger');
 const logger = require('../../utils/logger');
 
 function validatePayload(body) {
 	if (!body) return 'Payload inválido';
-	if (!body.monto || Number(body.monto) <= 0) return 'El campo monto debe ser mayor a 0';
-	if (!body.moneda) return 'El campo moneda es obligatorio';
+	const amount = body.monto ?? body.amount;
+	const currency = body.moneda ?? body.currency;
+	if (amount === undefined || amount === null || Number(amount) <= 0) return 'El campo monto/amount debe ser mayor a 0';
+	if (!currency) return 'El campo moneda/currency es obligatorio';
 	return null;
 }
 
@@ -18,8 +22,12 @@ async function createPayment(req, res) {
 		}
 
 		const empresaId = req.empresaId;
-		const proveedor = req.body.proveedor || 'mock';
-		const claveIdempotencia = req.body.clave_idempotencia || null;
+		const proveedor = req.body.proveedor || req.body.provider || req.body.paymentProvider || env.DEFAULT_PROVIDER || 'mock';
+		const monto = req.body.monto ?? req.body.amount;
+		const moneda = req.body.moneda ?? req.body.currency;
+		const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
+		const descripcion = req.body.descripcion ?? req.body.description ?? null;
+		const token = req.body.token ?? req.body.paymentToken ?? null;
 
 		// 🔁 Idempotencia
 		if (claveIdempotencia) {
@@ -41,25 +49,21 @@ async function createPayment(req, res) {
 		// 💾 Crear pago
 		const payment = await paymentModel.createPayment({
 			empresaId,
-			monto: req.body.monto,
-			moneda: req.body.moneda,
+			monto,
+			moneda,
 			estado: 'INITIATED',
 			proveedor,
 			claveIdempotencia,
-			descripcion: req.body.descripcion,
+			descripcion,
 		});
 
 		// 🧾 Auditoría
-		await paymentModel.registerAuditEvent({
+		await auditLogger.recordPaymentEvent({
 			empresaId,
-			accion: 'PAYMENT_STATUS_CHANGED',
-			entidad: 'pago',
-			entidadId: payment.id,
-			metadata: {
-				from: null,
-				to: 'INITIATED',
-				provider: proveedor,
-			},
+			paymentId: payment.id,
+			from: null,
+			to: 'INITIATED',
+			provider: proveedor,
 		});
 
 		// ⚙️ Orquestador
@@ -67,7 +71,7 @@ async function createPayment(req, res) {
 			empresaId,
 			proveedor,
 			payment,
-			token: req.body.token,
+			token,
 			metadata: req.body.metadata || {},
 		});
 
@@ -97,7 +101,8 @@ async function createPayment(req, res) {
 
 async function refundPayment(req, res) {
 	const { transactionId } = req.params;
-	const { proveedor, monto } = req.body;
+	const proveedor = req.body.proveedor || req.body.provider || env.DEFAULT_PROVIDER || 'paypal';
+	const { monto } = req.body;
 
 	if (!proveedor || !transactionId) {
 		return res.status(400).json({
@@ -124,7 +129,7 @@ async function refundPayment(req, res) {
 
 async function getPaymentStatus(req, res) {
 	const { transactionId } = req.params;
-	const { proveedor } = req.query;
+	const proveedor = req.query.proveedor || req.query.provider || env.DEFAULT_PROVIDER || 'paypal';
 
 	if (!proveedor || !transactionId) {
 		return res.status(400).json({
