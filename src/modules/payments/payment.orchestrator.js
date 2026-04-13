@@ -5,131 +5,146 @@ const paymentModel = require('./payment.model');
 const auditLogger = require('../../utils/auditLogger');
 
 class PaymentOrchestrator {
-	async processPayment(context) {
-		const paymentId = context.payment.id;
-		const empresaId = context.empresaId;
-		const providerName = context.proveedor;
+    /**
+     * Procesa un pago completo con lógica de reintentos, 
+     * actualización de estados y auditoría.
+     */
+    async processPayment(context) {
+        const paymentId = context.payment.id;
+        const empresaId = context.empresaId;
+        const providerName = context.proveedor;
 
-		await paymentModel.updatePaymentStatus(paymentId, empresaId, 'PROCESSING');
+        // 1. Marcar inicio de procesamiento
+        await paymentModel.updatePaymentStatus(paymentId, empresaId, 'PROCESSING');
 
-		await auditLogger.recordPaymentEvent({
-			empresaId,
-			paymentId,
-			from: 'INITIATED',
-			to: 'PROCESSING',
-			provider: providerName,
-		});
+        await auditLogger.recordPaymentEvent({
+            empresaId,
+            paymentId,
+            from: 'INITIATED',
+            to: 'PROCESSING',
+            provider: providerName,
+        });
 
-		const provider = providerRegistry.resolve(providerName);
+        // 2. Resolver el proveedor (Stripe, PayPal, Mock, etc.)
+        const provider = providerRegistry.resolve(providerName);
 
-		try {
-			const result = await executeWithRetry(
-				async () => provider.charge({
-					paymentId,
-					empresaId,
-					amount: context.payment.monto,
-					currency: context.payment.moneda,
-					token: context.token,
-					description: context.payment.descripcion,
-					metadata: context.metadata,
-				}),
-				{
-					maxRetries: 2,
-					shouldRetry: (error) => isTechnicalError(error),
-				}
-			);
+        try {
+            // 3. Ejecutar cargo con política de reintentos para errores técnicos
+            const result = await executeWithRetry(
+                async () => provider.charge({
+                    paymentId,
+                    empresaId,
+                    amount: context.payment.monto,
+                    currency: context.payment.moneda,
+                    token: context.token,
+                    description: context.payment.descripcion,
+                    metadata: context.metadata,
+                }),
+                {
+                    maxRetries: 2,
+                    shouldRetry: (error) => isTechnicalError(error),
+                }
+            );
 
-			const providerTransactionId = result.providerTransactionId || result.transactionId || result.id || null;
+            const providerTransactionId = result.providerTransactionId || result.transactionId || result.id || null;
 
-			await paymentModel.updatePaymentStatus(paymentId, empresaId, 'COMPLETED');
+            // 4. Actualizar a éxito
+            await paymentModel.updatePaymentStatus(paymentId, empresaId, 'COMPLETED');
 
-			await paymentModel.insertTransaction({
-				pagoId: paymentId,
-				idTransaccionProveedor: providerTransactionId,
-				estado: 'COMPLETED',
-				codigoRespuesta: result.responseCode || '00',
-				mensajeRespuesta: result.message || 'Pago completado',
-			});
+            await paymentModel.insertTransaction({
+                pagoId: paymentId,
+                idTransaccionProveedor: providerTransactionId,
+                estado: 'COMPLETED',
+                codigoRespuesta: result.responseCode || '00',
+                mensajeRespuesta: result.message || 'Pago completado',
+            });
 
-			await auditLogger.recordPaymentEvent({
-				empresaId,
-				paymentId,
-				from: 'PROCESSING',
-				to: 'COMPLETED',
-				provider: providerName,
-				providerTransactionId,
-			});
+            await auditLogger.recordPaymentEvent({
+                empresaId,
+                paymentId,
+                from: 'PROCESSING',
+                to: 'COMPLETED',
+                provider: providerName,
+                providerTransactionId,
+            });
 
-			return {
-				paymentId,
-				status: 'COMPLETED',
-				provider: providerName,
-				providerTransactionId,
-				message: result.message || 'Pago completado',
-			};
-		} catch (error) {
-			await paymentModel.updatePaymentStatus(paymentId, empresaId, 'FAILED');
+            return {
+                paymentId,
+                status: 'COMPLETED',
+                provider: providerName,
+                providerTransactionId,
+                message: result.message || 'Pago completado',
+            };
 
-			await paymentModel.insertTransaction({
-				pagoId: paymentId,
-				idTransaccionProveedor: null,
-				estado: 'FAILED',
-				codigoRespuesta: error.code || 'PAYMENT_FAILED',
-				mensajeRespuesta: error.message || 'Pago fallido',
-			});
+        } catch (error) {
+            // 5. Manejo de fallos
+            await paymentModel.updatePaymentStatus(paymentId, empresaId, 'FAILED');
 
-			await auditLogger.recordPaymentEvent({
-				empresaId,
-				paymentId,
-				from: 'PROCESSING',
-				to: 'FAILED',
-				provider: providerName,
-				errorCode: error.code || 'PAYMENT_FAILED',
-				errorMessage: error.message,
-			});
+            await paymentModel.insertTransaction({
+                pagoId: paymentId,
+                idTransaccionProveedor: null,
+                estado: 'FAILED',
+                codigoRespuesta: error.code || 'PAYMENT_FAILED',
+                mensajeRespuesta: error.message || 'Pago fallido',
+            });
 
-			if (error instanceof BusinessError) {
-				throw error;
-			}
+            await auditLogger.recordPaymentEvent({
+                empresaId,
+                paymentId,
+                from: 'PROCESSING',
+                to: 'FAILED',
+                provider: providerName,
+                errorCode: error.code || 'PAYMENT_FAILED',
+                errorMessage: error.message,
+            });
 
-			throw new TechnicalError(error.message || 'Fallo técnico procesando pago', {
-				code: error.code || 'PAYMENT_TECHNICAL_FAILURE',
-				statusCode: error.statusCode || 502,
-			});
-		}
-	}
+            // Re-lanzar error de negocio o envolver en error técnico
+            if (error instanceof BusinessError) {
+                throw error;
+            }
 
-	// 🔁 Refund (reintegrado)
-	async processRefund({ proveedor, transactionId, monto }) {
-		const provider = providerRegistry.resolve(proveedor);
+            throw new TechnicalError(error.message || 'Fallo técnico procesando pago', {
+                code: error.code || 'PAYMENT_TECHNICAL_FAILURE',
+                statusCode: error.statusCode || 502,
+            });
+        }
+    }
 
-		try {
-			return await provider.refund(transactionId, monto);
-		} catch (error) {
-			if (error instanceof BusinessError) throw error;
+    /**
+     * Procesa un reembolso a través del proveedor indicado.
+     */
+    async processRefund({ proveedor, transactionId, monto }) {
+        const provider = providerRegistry.resolve(proveedor);
 
-			throw new TechnicalError(error.message || 'Error en refund', {
-				code: error.code || 'REFUND_ERROR',
-				statusCode: error.statusCode || 500,
-			});
-		}
-	}
+        try {
+            return await provider.refund(transactionId, monto);
+        } catch (error) {
+            if (error instanceof BusinessError) throw error;
 
-	// 🔍 Status (reintegrado)
-	async getPaymentStatus({ proveedor, transactionId }) {
-		const provider = providerRegistry.resolve(proveedor);
+            throw new TechnicalError(error.message || 'Error en refund', {
+                code: error.code || 'REFUND_ERROR',
+                statusCode: error.statusCode || 500,
+            });
+        }
+    }
 
-		try {
-			return await provider.getStatus(transactionId);
-		} catch (error) {
-			if (error instanceof BusinessError) throw error;
+    /**
+     * Consulta el estado de un pago directamente con el proveedor.
+     */
+    async getPaymentStatus({ proveedor, transactionId }) {
+        const provider = providerRegistry.resolve(proveedor);
 
-			throw new TechnicalError(error.message || 'Error obteniendo estado', {
-				code: error.code || 'STATUS_ERROR',
-				statusCode: error.statusCode || 500,
-			});
-		}
-	}
+        try {
+            return await provider.getStatus(transactionId);
+        } catch (error) {
+            if (error instanceof BusinessError) throw error;
+
+            throw new TechnicalError(error.message || 'Error obteniendo estado', {
+                code: error.code || 'STATUS_ERROR',
+                statusCode: error.statusCode || 500,
+            });
+        }
+    }
 }
 
 module.exports = new PaymentOrchestrator();

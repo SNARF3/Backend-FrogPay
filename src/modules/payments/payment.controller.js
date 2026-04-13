@@ -11,11 +11,14 @@ const pool = require('../../config/database');
 const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
 const { tokenizeCardMock } = require('../providers/stripe.mock');
 
+/**
+ * UTILS
+ */
 function detectCardBrandFromToken(cardToken) {
-	const normalized = String(cardToken || '').replace(/\D/g, '');
-	if (normalized.startsWith('4')) return 'VISA';
-	if (normalized.startsWith('5')) return 'MASTERCARD';
-	return 'UNKNOWN';
+    const normalized = String(cardToken || '').replace(/\D/g, '');
+    if (normalized.startsWith('4')) return 'VISA';
+    if (normalized.startsWith('5')) return 'MASTERCARD';
+    return 'UNKNOWN';
 }
 
 function validatePayload(body) {
@@ -27,6 +30,10 @@ function validatePayload(body) {
     return null;
 }
 
+/**
+ * HANDLERS
+ */
+
 async function createPayment(req, res) {
     try {
         const validationError = validatePayload(req.body);
@@ -34,29 +41,26 @@ async function createPayment(req, res) {
             return res.status(400).json({ error: validationError });
         }
 
-		const empresaId = req.empresaId;
-		const proveedor = req.body.proveedor || req.body.provider || req.body.paymentProvider || env.DEFAULT_PROVIDER || 'mock';
-		const monto = req.body.monto ?? req.body.amount;
-		const moneda = req.body.moneda ?? req.body.currency;
-		const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
-		const descripcion = req.body.descripcion ?? req.body.description ?? null;
-		const token = req.body.card_token ?? req.body.token ?? req.body.paymentToken ?? null;
-		const cardBrand = proveedor === 'card' ? detectCardBrandFromToken(token) : null;
+        const empresaId = req.empresaId;
+        const proveedor = req.body.proveedor || req.body.provider || req.body.paymentProvider || env.DEFAULT_PROVIDER || 'mock';
+        const monto = req.body.monto ?? req.body.amount;
+        const moneda = req.body.moneda ?? req.body.currency;
+        const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
+        const descripcion = req.body.descripcion ?? req.body.description ?? 'Pago FrogPay';
+        const token = req.body.card_token ?? req.body.token ?? req.body.paymentToken ?? req.body.cardNumber ?? null;
+        
+        const cardBrand = (proveedor === 'card' || proveedor === 'stripe') ? detectCardBrandFromToken(token) : null;
 
-		if (proveedor === 'card' && !token) {
-			return res.status(400).json({
-				error: 'El campo card_token es obligatorio cuando provider es card',
-				code: 'CARD_TOKEN_REQUIRED',
-			});
-		}
+        if ((proveedor === 'card' || proveedor === 'stripe') && !token) {
+            return res.status(400).json({
+                error: 'El campo card_token o cardNumber es obligatorio para este proveedor',
+                code: 'CARD_TOKEN_REQUIRED',
+            });
+        }
 
         // 🔁 Idempotencia
         if (claveIdempotencia) {
-            const existingPayment = await paymentModel.findByIdempotency(
-                empresaId,
-                claveIdempotencia
-            );
-
+            const existingPayment = await paymentModel.findByIdempotency(empresaId, claveIdempotencia);
             if (existingPayment) {
                 return res.status(200).json({
                     payment_id: existingPayment.id,
@@ -67,17 +71,17 @@ async function createPayment(req, res) {
             }
         }
 
-		// 💾 Crear pago
-		const payment = await paymentModel.createPayment({
-			empresaId,
-			monto,
-			moneda,
-			estado: 'INITIATED',
-			proveedor,
-			claveIdempotencia,
-			descripcion,
-			cardBrand,
-		});
+        // 💾 Crear registro inicial en BD
+        const payment = await paymentModel.createPayment({
+            empresaId,
+            monto,
+            moneda,
+            estado: 'INITIATED',
+            proveedor,
+            claveIdempotencia,
+            descripcion,
+            cardBrand,
+        });
 
         // 🧾 Auditoría
         await auditLogger.recordPaymentEvent({
@@ -88,7 +92,7 @@ async function createPayment(req, res) {
             provider: proveedor,
         });
 
-        // ⚙️ Orquestador
+        // ⚙️ Ejecutar Orquestador
         const result = await paymentOrchestrator.processPayment({
             empresaId,
             proveedor,
@@ -97,27 +101,24 @@ async function createPayment(req, res) {
             metadata: req.body.metadata || {},
         });
 
-		return res.status(201).json({
-			payment_id: result.paymentId,
-			estado: result.status,
-			proveedor: result.provider,
-			card_brand: payment.card_brand || cardBrand,
-			id_transaccion_proveedor: result.providerTransactionId,
-			mensaje: result.message,
-		});
-	} catch (error) {
-		logger.error(`createPayment: ${error.message}`);
+        return res.status(201).json({
+            payment_id: result.paymentId || result.transactionId,
+            estado: result.status,
+            proveedor: result.provider,
+            card_brand: payment.cardBrand || cardBrand,
+            id_transaccion_proveedor: result.providerTransactionId,
+            mensaje: result.message || 'Pago procesado exitosamente',
+        });
 
-        if (error instanceof BusinessError) {
-            return res.status(error.statusCode).json({
-                error: error.message,
-                code: error.code,
-            });
-        }
-
-        return res.status(error.statusCode || 500).json({
+    } catch (error) {
+        logger.error(`createPayment: ${error.message}`);
+        const statusCode = error.statusCode || (error instanceof BusinessError ? error.statusCode : 500);
+        
+        return res.status(statusCode).json({
             error: error.message || 'Error interno al procesar el pago',
+            estado: 'FAILED',
             code: error.code || 'INTERNAL_ERROR',
+            raw: error.raw || null
         });
     }
 }
@@ -127,10 +128,8 @@ async function refundPayment(req, res) {
     const proveedor = req.body.proveedor || req.body.provider || env.DEFAULT_PROVIDER || 'paypal';
     const { monto } = req.body;
 
-    if (!proveedor || !transactionId) {
-        return res.status(400).json({
-            error: 'proveedor y transactionId son requeridos',
-        });
+    if (!transactionId) {
+        return res.status(400).json({ error: 'transactionId es requerido' });
     }
 
     try {
@@ -139,14 +138,10 @@ async function refundPayment(req, res) {
             transactionId,
             monto,
         });
-
         return res.status(200).json(result);
     } catch (error) {
         logger.error(`refundPayment: ${error.message}`);
-
-        return res.status(error.statusCode || 500).json({
-            error: error.message,
-        });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 }
 
@@ -154,10 +149,8 @@ async function getPaymentStatus(req, res) {
     const { transactionId } = req.params;
     const proveedor = req.query.proveedor || req.query.provider || env.DEFAULT_PROVIDER || 'paypal';
 
-    if (!proveedor || !transactionId) {
-        return res.status(400).json({
-            error: 'proveedor y transactionId son requeridos',
-        });
+    if (!transactionId) {
+        return res.status(400).json({ error: 'transactionId es requerido' });
     }
 
     try {
@@ -165,47 +158,34 @@ async function getPaymentStatus(req, res) {
             proveedor,
             transactionId,
         });
-
         return res.status(200).json(result);
     } catch (error) {
         logger.error(`getPaymentStatus: ${error.message}`);
-
-        return res.status(error.statusCode || 500).json({
-            error: error.message,
-        });
+        return res.status(error.statusCode || 500).json({ error: error.message });
     }
 }
 
-// 💳 Endpoint para validar, tokenizar y guardar tarjetas usando el Model
 async function registerCard(req, res) {
     try {
         const { cardType, cardholder, cardNumber, expiry, cvc } = req.body;
-        
-        // 1. Tomamos el ID ESTRICTAMENTE del middleware (ya sea por JWT o API Key real)
         const empresaId = req.empresaId;
 
-        // Si por alguna razón el middleware no inyectó el ID, rechazamos la petición
         if (!empresaId) {
-            return res.status(401).json({ 
-                error: 'No autorizado. No se pudo determinar a qué empresa pertenece esta acción.', 
-                code: 'UNAUTHORIZED' 
-            });
+            return res.status(401).json({ error: 'No autorizado.', code: 'UNAUTHORIZED' });
         }
 
-        // Limpiar el número de tarjeta (quitar espacios)
-        const cleanCardNumber = cardNumber ? cardNumber.replace(/\s/g, '') : '';
+        const cleanCardNumber = cardNumber ? String(cardNumber).replace(/\s/g, '') : '';
 
-        // 2. Validaciones previas
         if (!cleanCardNumber || !cardholder || !expiry || !cvc) {
             return res.status(400).json({ error: 'Faltan datos obligatorios.', code: 'MISSING_DATA' });
         }
+
         if (!isLuhnValid(cleanCardNumber)) {
             return res.status(400).json({ error: 'El número de tarjeta es inválido.', code: 'INVALID_CARD' });
         }
 
         const network = getCardNetwork(cleanCardNumber);
 
-        // 3. Simular Tokenización con Stripe
         const stripeResponse = await tokenizeCardMock({
             cardNumber: cleanCardNumber,
             expiry,
@@ -214,16 +194,14 @@ async function registerCard(req, res) {
             cardholder
         });
 
-        // 4. Guardar el Token Seguro en Base de Datos
         const savedCard = await cardModel.saveCardToken({
-            empresaId: empresaId, // <--- Ahora sí, usa el ID real
+            empresaId,
             tokenProveedor: stripeResponse.id, 
             ultimosCuatro: stripeResponse.last4,
             red: network,
-            tipo: cardType
+            tipo: cardType || 'CREDIT'
         });
 
-        // 5. Respuesta Exitosa
         return res.status(201).json({
             message: 'Tarjeta registrada y tokenizada correctamente.',
             data: {
@@ -234,43 +212,73 @@ async function registerCard(req, res) {
                 cardType: savedCard.tipo
             }
         });
-
     } catch (error) {
         logger.error(`registerCard: ${error.message}`);
-        return res.status(500).json({
-            error: error.message || 'Error interno al procesar la validación de la tarjeta.',
-            code: 'INTERNAL_ERROR'
-        });
+        return res.status(500).json({ error: error.message, code: 'INTERNAL_ERROR' });
     }
 }
 
 async function getCards(req, res) {
     try {
-        // req.empresaId ahora viene del JWT desencriptado por el middleware
         const empresaId = req.empresaId; 
-
         const cards = await paymentModel.getCardsByEmpresa(empresaId);
-
-        return res.status(200).json({
-            success: true,
-            count: cards.length,
-            data: cards
-        });
+        return res.status(200).json({ success: true, count: cards.length, data: cards });
     } catch (error) {
-        // ... (manejo de errores)
         logger.error(`getCards: ${error.message}`);
-        
-        return res.status(500).json({
-            error: 'Error interno al obtener el listado de tarjetas.',
-            code: 'INTERNAL_ERROR'
-        });
+        return res.status(500).json({ error: 'Error al obtener tarjetas.', code: 'INTERNAL_ERROR' });
     }
 }
 
-module.exports = {
-    createPayment,
-    refundPayment,
-    getPaymentStatus,
-    registerCard,
-	getCards,
+/**
+ * PAYPAL SPECIFIC METHODS
+ */
+async function createPaypalOrder(req, res) {
+    const { amount, currency, description } = req.body;
+    if (!amount || !currency) {
+        return res.status(400).json({ error: 'amount y currency son requeridos' });
+    }
+    try {
+        const registry = require('../providers/provider.registry');
+        const paypal = registry.getProvider('paypal');
+        const result = await paypal.createOrder({
+            amount: parseFloat(amount),
+            currency,
+            description: description || 'Pago FrogPay',
+        });
+        return res.status(201).json(result);
+    } catch (err) {
+        logger.error(`createPaypalOrder: ${err.message}`);
+        return res.status(err.statusCode || 500).json({ error: err.message, raw: err.raw });
+    }
+}
+
+async function capturePaypalOrder(req, res) {
+    const { orderId } = req.body;
+    if (!orderId) {
+        return res.status(400).json({ error: 'orderId es requerido' });
+    }
+    try {
+        const registry = require('../providers/provider.registry');
+        const paypal = registry.getProvider('paypal');
+        const result = await paypal.captureOrder(orderId);
+        return res.status(200).json({
+            ...result,
+            payment_id: result.transactionId,
+            estado: result.status,
+            mensaje: 'Pago capturado exitosamente',
+        });
+    } catch (err) {
+        logger.error(`capturePaypalOrder: ${err.message}`);
+        return res.status(err.statusCode || 500).json({ error: err.message, raw: err.raw });
+    }
+}
+
+module.exports = { 
+    createPayment, 
+    refundPayment, 
+    getPaymentStatus, 
+    registerCard, 
+    getCards, 
+    createPaypalOrder, 
+    capturePaypalOrder 
 };
