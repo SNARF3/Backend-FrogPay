@@ -10,9 +10,9 @@ async function runTest() {
   console.log('--- Iniciando Prueba de Integración de Webhooks ---');
 
   try {
-    // 1. Limpiar cola previa (opcional para test limpio)
+    // 1. Limpiar cola previa (para test limpio - evitar errores)
     await webhookQueue.drain();
-    console.log('✅ Cola BullMQ limpiada.');
+    console.log('Cola BullMQ limpiada.');
 
     // 2. Simular un pago de prueba
     const mockPayment = {
@@ -23,25 +23,25 @@ async function runTest() {
       estado: 'COMPLETADO'
     };
 
-    console.log('📡 Despachando evento: pago.completado...');
+    console.log(' Despachando evento: pago.completado...');
     const result = await webhookDispatcher.dispatch(mockPayment, 'pago.completado');
 
     if (result) {
-      console.log('✅ Evento encolado exitosamente en BullMQ.');
+      console.log(' Evento encolado exitosamente en BullMQ.');
     } else {
-      console.log('❌ Error al encolar el evento.');
+      console.log(' Error al encolar el evento.');
     }
 
     // 3. Verificar conteo de jobs
     const jobCount = await webhookQueue.getWaitingCount();
-    console.log(`📊 Trabajos esperando en cola: ${jobCount}`);
+    console.log(` Trabajos esperando en cola: ${jobCount}`);
 
     if (jobCount > 0) {
-      console.log('🚀 PRUEBA EXITOSA: El despachador funciona correctamente.');
+      console.log('PRUEBA EXITOSA: El despachador funciona correctamente.');
     }
 
   } catch (error) {
-    console.error('❌ Error durante la prueba:', error.message);
+    console.error('Error durante la prueba:', error.message);
   } finally {
     // No cerramos el pool aquí si el worker está corriendo en otro proceso, 
     // pero para este script corto salimos.
