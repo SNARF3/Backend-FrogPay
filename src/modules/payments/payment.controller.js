@@ -5,6 +5,13 @@ const env = require('../../config/env');
 const auditLogger = require('../../utils/auditLogger');
 const logger = require('../../utils/logger');
 
+function detectCardBrandFromToken(cardToken) {
+	const normalized = String(cardToken || '').replace(/\D/g, '');
+	if (normalized.startsWith('4')) return 'VISA';
+	if (normalized.startsWith('5')) return 'MASTERCARD';
+	return 'UNKNOWN';
+}
+
 function validatePayload(body) {
 	if (!body) return 'Payload inválido';
 	const amount = body.monto ?? body.amount;
@@ -27,7 +34,15 @@ async function createPayment(req, res) {
 		const moneda = req.body.moneda ?? req.body.currency;
 		const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
 		const descripcion = req.body.descripcion ?? req.body.description ?? null;
-		const token = req.body.token ?? req.body.paymentToken ?? null;
+		const token = req.body.card_token ?? req.body.token ?? req.body.paymentToken ?? null;
+		const cardBrand = proveedor === 'card' ? detectCardBrandFromToken(token) : null;
+
+		if (proveedor === 'card' && !token) {
+			return res.status(400).json({
+				error: 'El campo card_token es obligatorio cuando provider es card',
+				code: 'CARD_TOKEN_REQUIRED',
+			});
+		}
 
 		// 🔁 Idempotencia
 		if (claveIdempotencia) {
@@ -55,6 +70,7 @@ async function createPayment(req, res) {
 			proveedor,
 			claveIdempotencia,
 			descripcion,
+			cardBrand,
 		});
 
 		// 🧾 Auditoría
@@ -79,6 +95,7 @@ async function createPayment(req, res) {
 			payment_id: result.paymentId,
 			estado: result.status,
 			proveedor: result.provider,
+			card_brand: payment.card_brand || cardBrand,
 			id_transaccion_proveedor: result.providerTransactionId,
 			mensaje: result.message,
 		});
