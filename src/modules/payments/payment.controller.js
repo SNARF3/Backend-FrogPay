@@ -11,6 +11,13 @@ const pool = require('../../config/database');
 const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
 const { tokenizeCardMock } = require('../providers/stripe.mock');
 
+function detectCardBrandFromToken(cardToken) {
+	const normalized = String(cardToken || '').replace(/\D/g, '');
+	if (normalized.startsWith('4')) return 'VISA';
+	if (normalized.startsWith('5')) return 'MASTERCARD';
+	return 'UNKNOWN';
+}
+
 function validatePayload(body) {
     if (!body) return 'Payload inválido';
     const amount = body.monto ?? body.amount;
@@ -27,13 +34,21 @@ async function createPayment(req, res) {
             return res.status(400).json({ error: validationError });
         }
 
-        const empresaId = req.empresaId;
-        const proveedor = req.body.proveedor || req.body.provider || req.body.paymentProvider || env.DEFAULT_PROVIDER || 'mock';
-        const monto = req.body.monto ?? req.body.amount;
-        const moneda = req.body.moneda ?? req.body.currency;
-        const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
-        const descripcion = req.body.descripcion ?? req.body.description ?? null;
-        const token = req.body.token ?? req.body.paymentToken ?? null;
+		const empresaId = req.empresaId;
+		const proveedor = req.body.proveedor || req.body.provider || req.body.paymentProvider || env.DEFAULT_PROVIDER || 'mock';
+		const monto = req.body.monto ?? req.body.amount;
+		const moneda = req.body.moneda ?? req.body.currency;
+		const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
+		const descripcion = req.body.descripcion ?? req.body.description ?? null;
+		const token = req.body.card_token ?? req.body.token ?? req.body.paymentToken ?? null;
+		const cardBrand = proveedor === 'card' ? detectCardBrandFromToken(token) : null;
+
+		if (proveedor === 'card' && !token) {
+			return res.status(400).json({
+				error: 'El campo card_token es obligatorio cuando provider es card',
+				code: 'CARD_TOKEN_REQUIRED',
+			});
+		}
 
         // 🔁 Idempotencia
         if (claveIdempotencia) {
@@ -52,16 +67,17 @@ async function createPayment(req, res) {
             }
         }
 
-        // 💾 Crear pago
-        const payment = await paymentModel.createPayment({
-            empresaId,
-            monto,
-            moneda,
-            estado: 'INITIATED',
-            proveedor,
-            claveIdempotencia,
-            descripcion,
-        });
+		// 💾 Crear pago
+		const payment = await paymentModel.createPayment({
+			empresaId,
+			monto,
+			moneda,
+			estado: 'INITIATED',
+			proveedor,
+			claveIdempotencia,
+			descripcion,
+			cardBrand,
+		});
 
         // 🧾 Auditoría
         await auditLogger.recordPaymentEvent({
@@ -81,15 +97,16 @@ async function createPayment(req, res) {
             metadata: req.body.metadata || {},
         });
 
-        return res.status(201).json({
-            payment_id: result.paymentId,
-            estado: result.status,
-            proveedor: result.provider,
-            id_transaccion_proveedor: result.providerTransactionId,
-            mensaje: result.message,
-        });
-    } catch (error) {
-        logger.error(`createPayment: ${error.message}`);
+		return res.status(201).json({
+			payment_id: result.paymentId,
+			estado: result.status,
+			proveedor: result.provider,
+			card_brand: payment.card_brand || cardBrand,
+			id_transaccion_proveedor: result.providerTransactionId,
+			mensaje: result.message,
+		});
+	} catch (error) {
+		logger.error(`createPayment: ${error.message}`);
 
         if (error instanceof BusinessError) {
             return res.status(error.statusCode).json({
