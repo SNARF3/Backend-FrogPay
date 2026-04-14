@@ -6,7 +6,10 @@ const env = require('../../config/env');
 const auditLogger = require('../../utils/auditLogger');
 const logger = require('../../utils/logger');
 const pool = require('../../config/database');
-
+const { getPaymentEventsService ,  getTimelineService,
+  getTransactionsService,
+  getAuditService,
+  getErrorsService} = require('./payment.service');
 // Nuevas importaciones para el manejo de tarjetas
 const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
 const { tokenizeCardMock } = require('../providers/stripe.mock');
@@ -263,11 +266,74 @@ async function getCards(req, res) {
         });
     }
 }
+const getPaymentEventsController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const empresaId = req.empresaId;
 
+    const events = await getPaymentEventsService(id, empresaId);
+
+    return res.status(200).json(events);
+
+  } catch (error) {
+    if (error.message === "NOT_FOUND") {
+      return res.status(404).json({ error: "Payment not found" });
+    }
+
+    console.error("Error getting payment events:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+const handle404 = (res) => res.status(404).json({ error: "Payment not found" });
+
+const getTimelineController = async (req, res) => {
+  try {
+    const data = await getTimelineService(req.params.id, req.empresaId);
+    res.json(data);
+  } catch (e) {
+    if (e.message === "NOT_FOUND") return handle404(res);
+    res.status(500).json({ error: "Internal error" });
+  }
+};
+
+const getTransactionsController = async (req, res) => {
+  try {
+    const data = await getTransactionsService(req.params.id, req.empresaId);
+    res.json(data);
+  } catch (e) {
+    if (e.message === "NOT_FOUND") return handle404(res);
+    res.status(500).json({ error: "Internal error" });
+  }
+};
+
+const getAuditController = async (req, res) => {
+  try {
+    const data = await getAuditService(req.params.id, req.empresaId);
+    res.json(data);
+  } catch (e) {
+    if (e.message === "NOT_FOUND") return handle404(res);
+    res.status(500).json({ error: "Internal error" });
+  }
+};
+
+const getErrorsController = async (req, res) => {
+  try {
+    const data = await getErrorsService(req.params.id, req.empresaId);
+    res.json(data);
+  } catch (e) {
+    if (e.message === "NOT_FOUND") return handle404(res);
+    res.status(500).json({ error: "Internal error" });
+  }
+};
 module.exports = {
     createPayment,
     refundPayment,
     getPaymentStatus,
     registerCard,
 	getCards,
+    getPaymentEventsController,
+    getTimelineController,
+    getTransactionsController,
+    getAuditController,
+    getErrorsController
 };
