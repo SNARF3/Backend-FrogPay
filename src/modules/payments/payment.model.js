@@ -2,7 +2,7 @@ const pool = require('../../config/database');
 
 async function findByIdempotency(empresaId, claveIdempotencia) {
 	const query = `
-		SELECT id, empresa_id, monto, moneda, estado, proveedor, card_brand, clave_idempotencia, descripcion, creado_en, actualizado_en
+		SELECT id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, creado_en, actualizado_en
 		FROM pagos
 		WHERE empresa_id = $1 AND clave_idempotencia = $2
 		LIMIT 1;
@@ -20,11 +20,10 @@ async function createPayment(data) {
 			moneda,
 			estado,
 			proveedor,
-			card_brand,
 			clave_idempotencia,
 			descripcion
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, empresa_id, monto, moneda, estado, proveedor, card_brand, clave_idempotencia, descripcion, creado_en, actualizado_en;
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, creado_en, actualizado_en;
 	`;
 
 	const values = [
@@ -33,7 +32,6 @@ async function createPayment(data) {
 		data.moneda,
 		data.estado,
 		data.proveedor,
-		data.cardBrand || null,
 		data.claveIdempotencia || null,
 		data.descripcion || null,
 	];
@@ -48,7 +46,7 @@ async function updatePaymentStatus(paymentId, empresaId, estado) {
 		SET estado = $1,
 			actualizado_en = CURRENT_TIMESTAMP
 		WHERE id = $2 AND empresa_id = $3
-		RETURNING id, empresa_id, monto, moneda, estado, proveedor, card_brand, clave_idempotencia, descripcion, creado_en, actualizado_en;
+		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, creado_en, actualizado_en;
 	`;
 
 	const { rows } = await pool.query(query, [estado, paymentId, empresaId]);
