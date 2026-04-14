@@ -11,7 +11,9 @@ const {
     getTimelineController,
     getTransactionsController,
     getAuditController,
-    getErrorsController
+    getErrorsController,
+    createPaypalOrder,
+    capturePaypalOrder,
 
 } = require('../modules/payments/payment.controller');
 
@@ -20,6 +22,10 @@ router.post('/cards', authMiddleware, registerCard);
 
 // 📌 Listar tarjetas de la empresa (PROTEGIDO)
 router.get('/cards', authMiddleware, getCards);
+
+// 📌 PayPal — flujo de 2 pasos
+router.post('/paypal/create-order', authMiddleware, createPaypalOrder);
+router.post('/paypal/capture-order', authMiddleware, capturePaypalOrder);
 
 // 📌 Crear pago
 router.post('/', authMiddleware, createPayment);
