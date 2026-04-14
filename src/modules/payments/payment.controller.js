@@ -293,6 +293,36 @@ async function getErrorsController(req, res) {
     }
 }
 
+async function createPaypalOrder(req, res) {
+    try {
+        const { amount, currency, description } = req.body;
+        if (!amount || !currency) {
+            return res.status(400).json({ error: 'amount y currency son requeridos' });
+        }
+        const paypalProvider = require('../providers/paypal.provider');
+        const result = await paypalProvider.createOrder({ amount, currency, description });
+        return res.status(201).json(result);
+    } catch (error) {
+        logger.error(`createPaypalOrder: ${error.message}`);
+        return res.status(error.statusCode || 500).json({ error: error.message });
+    }
+}
+
+async function capturePaypalOrder(req, res) {
+    try {
+        const { orderId } = req.body;
+        if (!orderId) {
+            return res.status(400).json({ error: 'orderId es requerido' });
+        }
+        const paypalProvider = require('../providers/paypal.provider');
+        const result = await paypalProvider.captureOrder(orderId);
+        return res.status(200).json(result);
+    } catch (error) {
+        logger.error(`capturePaypalOrder: ${error.message}`);
+        return res.status(error.statusCode || 500).json({ error: error.message });
+    }
+}
+
 async function refundPayment(req, res) {
     const proveedor = req.body.proveedor || req.body.provider;
     const transactionId = req.body.transactionId;
@@ -332,4 +362,6 @@ module.exports = {
     getTransactionsController,
     getAuditController,
     getErrorsController,
+    createPaypalOrder,
+    capturePaypalOrder,
 };
