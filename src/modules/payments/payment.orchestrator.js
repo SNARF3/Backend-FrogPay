@@ -3,12 +3,33 @@ const { executeWithRetry } = require('../../utils/retry');
 const { isTechnicalError, BusinessError, TechnicalError } = require('../../utils/errors');
 const paymentModel = require('./payment.model');
 const auditLogger = require('../../utils/auditLogger');
+const env = require('../../config/env');
+
+function getMonthlyLimitByPlan(plan) {
+  if (plan === 'pro') return Number.POSITIVE_INFINITY;
+  return env.FREE_MONTHLY_TX_LIMIT;
+}
 
 class PaymentOrchestrator {
 	async processPayment(context) {
 		const paymentId = context.payment.id;
 		const empresaId = context.empresaId;
 		const providerName = context.proveedor;
+		const plan = context.plan || (await paymentModel.getCompanyPlan(empresaId));
+		const usage = await paymentModel.getMonthlyUsage(empresaId);
+		const limit = getMonthlyLimitByPlan(plan);
+
+		if (usage.total_transacciones >= limit) {
+			throw new BusinessError('Tu plan actual alcanzó el límite mensual de transacciones.', {
+				code: 'PLAN_LIMIT_EXCEEDED',
+				statusCode: 402,
+				details: {
+					plan,
+					limit,
+					current: usage.total_transacciones,
+				},
+			});
+		}
 
 		await paymentModel.updatePaymentStatus(paymentId, empresaId, 'PROCESSING');
 
@@ -50,6 +71,8 @@ class PaymentOrchestrator {
 				codigoRespuesta: result.responseCode || '00',
 				mensajeRespuesta: result.message || 'Pago completado',
 			});
+
+			await paymentModel.incrementMonthlyUsage(empresaId, context.payment.monto);
 
 			await auditLogger.recordPaymentEvent({
 				empresaId,
@@ -104,7 +127,7 @@ class PaymentOrchestrator {
 		const provider = providerRegistry.resolve(proveedor);
 
 		try {
-			return await provider.refund(transactionId, monto);
+			return await provider.refund({ transactionId, amount: monto });
 		} catch (error) {
 			if (error instanceof BusinessError) throw error;
 

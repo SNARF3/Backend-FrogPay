@@ -6,6 +6,28 @@ function isTechnicalStatus(status) {
   return status === 408 || status === 429 || status >= 500;
 }
 
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.PAYPAL_REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new TechnicalError('Timeout consultando PayPal', {
+        code: 'PAYPAL_TIMEOUT',
+        statusCode: 504,
+      });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function readJsonSafe(response) {
   try {
     return await response.json();
@@ -29,17 +51,13 @@ function buildError(operation, response, data) {
   return new PaymentFailedError(message, payload);
 }
 
-function hasIssue(data, issueCode) {
-  return Array.isArray(data?.details) && data.details.some((detail) => detail?.issue === issueCode);
-}
-
 class PayPalProvider extends PaymentProvider {
   async _getAccessToken() {
     const credentials = Buffer.from(
       `${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_CLIENT_SECRET}`
     ).toString('base64');
 
-    const response = await fetch(`${env.PAYPAL_BASE_URL}/v1/oauth2/token`, {
+    const response = await fetchWithTimeout(`${env.PAYPAL_BASE_URL}/v1/oauth2/token`, {
       method: 'POST',
       headers: {
         Authorization: `Basic ${credentials}`,
@@ -62,7 +80,7 @@ class PayPalProvider extends PaymentProvider {
     const { amount, currency, description } = payload;
     const accessToken = await this._getAccessToken();
 
-    const createRes = await fetch(`${env.PAYPAL_BASE_URL}/v2/checkout/orders`, {
+    const createRes = await fetchWithTimeout(`${env.PAYPAL_BASE_URL}/v2/checkout/orders`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -103,7 +121,7 @@ class PayPalProvider extends PaymentProvider {
   async captureOrder(orderId) {
     const accessToken = await this._getAccessToken();
 
-    const captureRes = await fetch(
+    const captureRes = await fetchWithTimeout(
       `${env.PAYPAL_BASE_URL}/v2/checkout/orders/${orderId}/capture`,
       {
         method: 'POST',
@@ -127,7 +145,7 @@ class PayPalProvider extends PaymentProvider {
     const { amount, currency, description } = payload;
     const accessToken = await this._getAccessToken();
 
-    const createRes = await fetch(`${env.PAYPAL_BASE_URL}/v2/checkout/orders`, {
+    const createRes = await fetchWithTimeout(`${env.PAYPAL_BASE_URL}/v2/checkout/orders`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -152,7 +170,7 @@ class PayPalProvider extends PaymentProvider {
 
     const orderId = order.id;
 
-    const captureRes = await fetch(
+    const captureRes = await fetchWithTimeout(
       `${env.PAYPAL_BASE_URL}/v2/checkout/orders/${orderId}/capture`,
       {
         method: 'POST',
@@ -166,34 +184,18 @@ class PayPalProvider extends PaymentProvider {
     const captured = await readJsonSafe(captureRes);
 
     if (!captureRes.ok) {
-      if (
-        process.env.PAYPAL_DEV_SIMULATE_SUCCESS === 'true' &&
-        hasIssue(captured, 'ORDER_NOT_APPROVED')
-      ) {
-        return {
-          success: true,
-          providerTransactionId: orderId,
-          status: 'COMPLETED',
-          responseCode: 'PAYPAL_SANDBOX_SIMULATION',
-          message: 'Pago completado en modo developer (sandbox sin aprobacion de comprador).',
-          raw: {
-            simulated: true,
-            order,
-            captureError: captured,
-          },
-        };
-      }
-
       throw buildError('capture PayPal order', captureRes, captured);
     }
 
     return { success: true, providerTransactionId: orderId, status: 'COMPLETED', message: 'Pago completado con PayPal', raw: captured };
   }
 
-  async refund(transactionId, amount) {
+  async refund(input, amountLegacy) {
+    const transactionId = typeof input === 'object' ? input.transactionId : input;
+    const amount = typeof input === 'object' ? input.amount : amountLegacy;
     const accessToken = await this._getAccessToken();
 
-    const orderRes = await fetch(
+    const orderRes = await fetchWithTimeout(
       `${env.PAYPAL_BASE_URL}/v2/checkout/orders/${transactionId}`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -213,7 +215,7 @@ class PayPalProvider extends PaymentProvider {
       throw new PaymentFailedError('No capture ID found for refund', order);
     }
 
-    const refundRes = await fetch(
+    const refundRes = await fetchWithTimeout(
       `${env.PAYPAL_BASE_URL}/v2/payments/captures/${captureId}/refund`,
       {
         method: 'POST',
@@ -239,7 +241,7 @@ class PayPalProvider extends PaymentProvider {
   async getStatus(transactionId) {
     const accessToken = await this._getAccessToken();
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${env.PAYPAL_BASE_URL}/v2/checkout/orders/${transactionId}`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },

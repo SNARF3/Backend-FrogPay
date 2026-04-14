@@ -10,6 +10,7 @@ const pool = require('../../config/database');
 // Nuevas importaciones para el manejo de tarjetas
 const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
 const { tokenizeCardMock } = require('../providers/stripe.mock');
+const paypalProvider = require('../providers/paypal.provider');
 
 function detectCardBrandFromToken(cardToken) {
 	const normalized = String(cardToken || '').replace(/\D/g, '');
@@ -40,7 +41,7 @@ async function createPayment(req, res) {
 		const moneda = req.body.moneda ?? req.body.currency;
 		const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
 		const descripcion = req.body.descripcion ?? req.body.description ?? null;
-		const token = req.body.card_token ?? req.body.token ?? req.body.paymentToken ?? null;
+        const token = req.body.card_token ?? req.body.token ?? req.body.paymentToken ?? req.body.paymentMethodId ?? null;
 		const cardBrand = proveedor === 'card' ? detectCardBrandFromToken(token) : null;
 
 		if (proveedor === 'card' && !token) {
@@ -91,6 +92,7 @@ async function createPayment(req, res) {
         // ⚙️ Orquestador
         const result = await paymentOrchestrator.processPayment({
             empresaId,
+            plan: req.plan,
             proveedor,
             payment,
             token,
@@ -101,7 +103,7 @@ async function createPayment(req, res) {
 			payment_id: result.paymentId,
 			estado: result.status,
 			proveedor: result.provider,
-			card_brand: payment.card_brand || cardBrand,
+            card_brand: cardBrand,
 			id_transaccion_proveedor: result.providerTransactionId,
 			mensaje: result.message,
 		});
@@ -122,7 +124,25 @@ async function createPayment(req, res) {
     }
 }
 
+function paymentHealthCheck(_req, res) {
+    return res.status(200).json({
+        ok: true,
+        service: 'payments',
+        timestamp: new Date().toISOString(),
+    });
+}
+
+function getStripeConfig(_req, res) {
+    return res.status(200).json({
+        publishableKey: env.STRIPE_PUBLISHABLE_KEY || null,
+        enabled: Boolean(env.STRIPE_PUBLISHABLE_KEY),
+    });
+}
+
 async function refundPayment(req, res) {
+    const { transactionId } = req.params;
+    const proveedor = req.body?.proveedor || req.body?.provider || req.query?.proveedor || req.query?.provider || env.DEFAULT_PROVIDER || 'paypal';
+    const monto = req.body?.monto ?? req.body?.amount ?? null;
 
     if (!proveedor || !transactionId) {
         return res.status(400).json({
@@ -131,11 +151,30 @@ async function refundPayment(req, res) {
     }
 
     try {
+        const alreadyRefunded = await paymentModel.hasRefundForProviderTransaction(transactionId);
+        if (alreadyRefunded) {
+            return res.status(409).json({
+                error: 'La transacción ya fue reembolsada previamente.',
+                code: 'REFUND_ALREADY_PROCESSED',
+            });
+        }
+
         const result = await paymentOrchestrator.processRefund({
             proveedor,
             transactionId,
             monto,
         });
+
+        const paymentRef = await paymentModel.findPaymentByProviderTransaction(transactionId);
+        if (paymentRef?.payment_id) {
+            await paymentModel.insertTransaction({
+                pagoId: paymentRef.payment_id,
+                idTransaccionProveedor: transactionId,
+                estado: 'REFUNDED',
+                codigoRespuesta: 'REFUND_OK',
+                mensajeRespuesta: 'Reembolso completado',
+            });
+        }
 
         return res.status(200).json(result);
     } catch (error) {
@@ -143,6 +182,56 @@ async function refundPayment(req, res) {
 
         return res.status(error.statusCode || 500).json({
             error: error.message,
+        });
+    }
+}
+
+async function createPayPalOrder(req, res) {
+    try {
+        const amount = Number(req.body?.amount);
+        const currency = req.body?.currency || 'USD';
+        const description = req.body?.description || 'Pago con PayPal';
+
+        if (!amount || amount <= 0) {
+            return res.status(400).json({
+                error: 'amount debe ser mayor a 0',
+                code: 'INVALID_AMOUNT',
+            });
+        }
+
+        const result = await paypalProvider.createOrder({
+            amount,
+            currency,
+            description,
+        });
+
+        return res.status(201).json(result);
+    } catch (error) {
+        logger.error(`createPayPalOrder: ${error.message}`);
+        return res.status(error.statusCode || 500).json({
+            error: error.message || 'Error creando orden PayPal',
+            code: error.code || 'PAYPAL_CREATE_ORDER_FAILED',
+        });
+    }
+}
+
+async function capturePayPalOrder(req, res) {
+    try {
+        const orderId = req.body?.orderId;
+        if (!orderId) {
+            return res.status(400).json({
+                error: 'orderId es obligatorio',
+                code: 'PAYPAL_ORDER_ID_REQUIRED',
+            });
+        }
+
+        const result = await paypalProvider.captureOrder(orderId);
+        return res.status(200).json(result);
+    } catch (error) {
+        logger.error(`capturePayPalOrder: ${error.message}`);
+        return res.status(error.statusCode || 500).json({
+            error: error.message || 'Error capturando orden PayPal',
+            code: error.code || 'PAYPAL_CAPTURE_ORDER_FAILED',
         });
     }
 }
@@ -270,4 +359,8 @@ module.exports = {
     getPaymentStatus,
     registerCard,
 	getCards,
+    createPayPalOrder,
+    capturePayPalOrder,
+    paymentHealthCheck,
+    getStripeConfig,
 };

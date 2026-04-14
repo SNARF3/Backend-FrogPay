@@ -50,4 +50,3 @@ class MockProvider extends PaymentProvider {
 }
 
 module.exports = new MockProvider();
-module.exports = new MockProvider();
