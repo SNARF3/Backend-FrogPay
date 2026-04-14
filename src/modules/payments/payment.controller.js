@@ -6,6 +6,7 @@ const env = require('../../config/env');
 const auditLogger = require('../../utils/auditLogger');
 const logger = require('../../utils/logger');
 const pool = require('../../config/database');
+const cardService = require('../cards/card.service');
 
 // Nuevas importaciones para el manejo de tarjetas
 const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
@@ -48,6 +49,18 @@ async function createPayment(req, res) {
 				error: 'El campo card_token es obligatorio cuando provider es card',
 				code: 'CARD_TOKEN_REQUIRED',
 			});
+		}
+
+		// 💳 Consumir token de Redis (un solo uso) cuando el proveedor es card
+		let tokenData = null;
+		if (proveedor === 'card' && token) {
+			tokenData = await cardService.consumeToken(token);
+			if (!tokenData) {
+				return res.status(400).json({
+					error: 'Token inválido o expirado',
+					code: 'INVALID_TOKEN',
+				});
+			}
 		}
 
         // 🔁 Idempotencia
