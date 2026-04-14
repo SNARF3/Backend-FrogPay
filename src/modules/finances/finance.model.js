@@ -18,4 +18,25 @@ const getKpisRango = async (empresaId, desdeDias, hastaDias) => {
   return rows[0];
 };
 
-module.exports = { getKpisRango };
+
+const getChartData = async (empresaId, dias) => {
+  const q = `
+    SELECT 
+      DATE(creado_en) as fecha,
+      COALESCE(SUM(monto), 0) as ingresos,
+      COUNT(id) as transacciones
+    FROM pagos
+    WHERE 
+      empresa_id = $1
+      AND estado IN ('COMPLETED', 'SUCCESS')
+      AND creado_en >= NOW() - INTERVAL '${dias} days'
+    GROUP BY DATE(creado_en)
+    ORDER BY DATE(creado_en) ASC;
+  `;
+
+  const { rows } = await pool.query(q, [empresaId]);
+  return rows;
+};
+
+
+module.exports = { getKpisRango,getChartData };
