@@ -30,9 +30,9 @@ router.post('/:transactionId/refund', authMiddleware, refundPayment);
 // 📌 Estado del pago
 router.get('/:transactionId/status', authMiddleware, getPaymentStatus);
 
-router.get('/payments/:id/events', authMiddleware, getPaymentEventsController);
-router.get('/payments/:id/timeline', authMiddleware, getTimelineController);
-router.get('/payments/:id/transactions', authMiddleware, getTransactionsController);
-router.get('/payments/:id/audit', authMiddleware, getAuditController);
-router.get('/payments/:id/errors', authMiddleware, getErrorsController);
+router.get('/:id/events', authMiddleware, getPaymentEventsController);
+router.get('/:id/timeline', authMiddleware, getTimelineController);
+router.get('/:id/transactions', authMiddleware, getTransactionsController);
+router.get('/:id/audit', authMiddleware, getAuditController);
+router.get('/:id/errors', authMiddleware, getErrorsController);
 module.exports = router;
