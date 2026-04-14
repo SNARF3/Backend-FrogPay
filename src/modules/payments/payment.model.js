@@ -243,6 +243,57 @@ async function hasRefundForProviderTransaction(transactionId) {
 	return rows.length > 0;
 }
 
+async function getRecentPaymentsForTenant(empresaId, limit = 30) {
+	const query = `
+		SELECT
+			p.id,
+			p.monto,
+			p.moneda,
+			p.estado,
+			p.proveedor,
+			p.descripcion,
+			p.creado_en,
+			p.actualizado_en,
+			t.id_transaccion_proveedor,
+			t.codigo_respuesta,
+			t.mensaje_respuesta,
+			t.creado_en AS transaccion_creada_en,
+			COALESCE(w.webhook_success_count, 0) AS webhook_success_count,
+			COALESCE(w.webhook_failed_count, 0) AS webhook_failed_count,
+			w.webhook_last_status,
+			w.webhook_last_attempt_at
+		FROM pagos p
+		LEFT JOIN LATERAL (
+			SELECT
+				tx.id_transaccion_proveedor,
+				tx.codigo_respuesta,
+				tx.mensaje_respuesta,
+				tx.creado_en
+			FROM transacciones tx
+			WHERE tx.pago_id = p.id
+			ORDER BY tx.creado_en DESC
+			LIMIT 1
+		) t ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT
+				COUNT(*) FILTER (WHERE l.estado = 'success') AS webhook_success_count,
+				COUNT(*) FILTER (WHERE l.estado = 'failed') AS webhook_failed_count,
+				(ARRAY_AGG(l.estado ORDER BY l.ultimo_intento DESC NULLS LAST))[1] AS webhook_last_status,
+				MAX(l.ultimo_intento) AS webhook_last_attempt_at
+			FROM logs_webhooks l
+			INNER JOIN webhooks wh ON wh.id = l.webhook_id
+			WHERE wh.empresa_id = p.empresa_id
+				AND (l.payload->'data'->>'payment_id') = p.id::text
+		) w ON TRUE
+		WHERE p.empresa_id = $1
+		ORDER BY p.creado_en DESC
+		LIMIT $2;
+	`;
+
+	const { rows } = await pool.query(query, [empresaId, limit]);
+	return rows;
+}
+
 module.exports = {
 	findByIdempotency,
 	createPayment,
@@ -255,4 +306,5 @@ module.exports = {
 	incrementMonthlyUsage,
 	findPaymentByProviderTransaction,
 	hasRefundForProviderTransaction,
+	getRecentPaymentsForTenant,
 };

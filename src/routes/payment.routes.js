@@ -12,6 +12,7 @@ const {
     capturePayPalOrder,
     paymentHealthCheck,
     getStripeConfig,
+	getPaymentsMonitor,
 } = require('../modules/payments/payment.controller');
 
 router.use(authMiddleware, tenantRateLimit);
@@ -31,6 +32,9 @@ router.get('/config/stripe', getStripeConfig);
 
 // 📌 Health check de pagos
 router.get('/health-check', paymentHealthCheck);
+
+// 📌 Monitor de pagos + estado de entrega de webhooks
+router.get('/monitor', getPaymentsMonitor);
 
 // 📌 Crear pago
 router.post('/', createPayment);

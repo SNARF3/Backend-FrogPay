@@ -353,6 +353,30 @@ async function getCards(req, res) {
     }
 }
 
+async function getPaymentsMonitor(req, res) {
+    try {
+        const empresaId = req.empresaId;
+        const parsedLimit = Number(req.query.limit);
+        const limit = Number.isFinite(parsedLimit)
+            ? Math.min(Math.max(Math.trunc(parsedLimit), 1), 100)
+            : 30;
+
+        const items = await paymentModel.getRecentPaymentsForTenant(empresaId, limit);
+
+        return res.status(200).json({
+            success: true,
+            count: items.length,
+            data: items,
+        });
+    } catch (error) {
+        logger.error(`getPaymentsMonitor: ${error.message}`);
+        return res.status(500).json({
+            error: 'Error interno obteniendo monitor de pagos',
+            code: 'PAYMENTS_MONITOR_FAILED',
+        });
+    }
+}
+
 module.exports = {
     createPayment,
     refundPayment,
@@ -363,4 +387,5 @@ module.exports = {
     capturePayPalOrder,
     paymentHealthCheck,
     getStripeConfig,
+	getPaymentsMonitor,
 };
