@@ -55,16 +55,37 @@ const getFinanceChartService = async (empresaId, rango) => {
   if (rango === '24h') dias = 1;
   if (rango === '30d') dias = 30;
 
-  const data = await getChartData(empresaId, dias);
+const data = await getChartData(empresaId, dias);
 
-  return data.map(row => ({
-    fecha: new Date(row.fecha).toLocaleDateString('es-BO', {
+// convertir a mapa
+const map = {};
+data.forEach(row => {
+  const fecha = new Date(row.fecha).toISOString().split('T')[0];
+  map[fecha] = {
+    ingresos: Number(row.ingresos),
+    transacciones: Number(row.transacciones)
+  };
+});
+
+// generar todos los días
+const result = [];
+
+for (let i = dias - 1; i >= 0; i--) {
+  const d = new Date();
+  d.setDate(d.getDate() - i);
+
+  const key = d.toISOString().split('T')[0];
+
+  result.push({
+    fecha: d.toLocaleDateString('es-BO', {
       day: '2-digit',
       month: 'short'
     }),
-    ingresos: Number(row.ingresos),
-    transacciones: Number(row.transacciones)
-  }));
-};
+    ingresos: map[key]?.ingresos || 0,
+    transacciones: map[key]?.transacciones || 0
+  });
+}
 
+return result;
+};
 module.exports = { getFinanceKpisService,getFinanceChartService  };
