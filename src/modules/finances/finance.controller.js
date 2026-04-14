@@ -24,7 +24,7 @@ const getFinanceKpisController = async (req, res) => {
 
 const getChart = async (req, res) => {
   try {
-    const empresaId = req.user.empresa_id;
+    const empresaId = req.empresaId; // ✅ FIX
     const { rango } = req.query;
 
     const data = await getFinanceChartService(empresaId, rango);
@@ -33,11 +33,11 @@ const getChart = async (req, res) => {
       success: true,
       data
     });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false });
   }
 };
-
 
 module.exports = { getFinanceKpisController, getChart };
