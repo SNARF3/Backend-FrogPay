@@ -7,6 +7,12 @@ const {
     getPaymentStatus,
     registerCard,
     getCards,
+    getPaymentEventsController,
+    getTimelineController,
+    getTransactionsController,
+    getAuditController,
+    getErrorsController
+
 } = require('../modules/payments/payment.controller');
 
 // 📌 Registrar tarjeta (PROTEGIDO)
@@ -24,4 +30,9 @@ router.post('/:transactionId/refund', authMiddleware, refundPayment);
 // 📌 Estado del pago
 router.get('/:transactionId/status', authMiddleware, getPaymentStatus);
 
+router.get('/:id/events', authMiddleware, getPaymentEventsController);
+router.get('/:id/timeline', authMiddleware, getTimelineController);
+router.get('/:id/transactions', authMiddleware, getTransactionsController);
+router.get('/:id/audit', authMiddleware, getAuditController);
+router.get('/:id/errors', authMiddleware, getErrorsController);
 module.exports = router;
