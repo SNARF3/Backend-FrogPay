@@ -12,6 +12,12 @@ class WebhookDispatcher {
    */
   async dispatch(payment, eventName) {
     try {
+      const jobId = `webhook:${payment.id}:${String(payment.estado || '').toUpperCase()}`;
+      const existingJob = await webhookQueue.getJob(jobId);
+      if (existingJob) {
+        return false;
+      }
+
       console.log(`[WebhookDispatcher] Enqueuing event ${eventName} for payment ${payment.id}`);
       
       const jobData = {
@@ -26,10 +32,15 @@ class WebhookDispatcher {
 
       // Add to BullMQ queue with retry logic
       await webhookQueue.add(`webhook-${payment.id}-${eventName}`, jobData, {
+        jobId,
         attempts: 5,
         backoff: {
           type: 'exponential',
           delay: 5000, // 5s, 10s, 20s...
+        },
+        removeOnComplete: {
+          age: 3600,
+          count: 1000,
         },
       });
 

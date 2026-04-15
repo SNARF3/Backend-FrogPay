@@ -13,6 +13,8 @@ const {
     paymentHealthCheck,
     getStripeConfig,
 	getPaymentsMonitor,
+    getProviderAccounts,
+    upsertProviderAccount,
 } = require('../modules/payments/payment.controller');
 
 router.use(authMiddleware, tenantRateLimit);
@@ -35,6 +37,10 @@ router.get('/health-check', paymentHealthCheck);
 
 // 📌 Monitor de pagos + estado de entrega de webhooks
 router.get('/monitor', getPaymentsMonitor);
+
+// 📌 Configuración de cuentas de cobro por tenant (mock/simulado)
+router.get('/provider-accounts', getProviderAccounts);
+router.put('/provider-accounts/:provider', upsertProviderAccount);
 
 // 📌 Crear pago
 router.post('/', createPayment);

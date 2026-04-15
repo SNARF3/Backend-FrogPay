@@ -12,6 +12,17 @@ const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
 const { tokenizeCardMock } = require('../providers/stripe.mock');
 const paypalProvider = require('../providers/paypal.provider');
 
+const SUPPORTED_PROVIDER_ACCOUNTS = {
+    paypal_mock: {
+        type: 'wallet_mock',
+        requiredConfig: ['displayName', 'merchantEmail', 'merchantAccountId', 'settlementCurrency'],
+    },
+    card_simulated: {
+        type: 'card_mock',
+        requiredConfig: ['accountHolderName', 'settlementAccountAlias', 'supportEmail', 'acceptedBrands', 'statementDescriptor'],
+    },
+};
+
 function detectCardBrandFromToken(cardToken) {
 	const normalized = String(cardToken || '').replace(/\D/g, '');
 	if (normalized.startsWith('4')) return 'VISA';
@@ -26,6 +37,87 @@ function validatePayload(body) {
     if (amount === undefined || amount === null || Number(amount) <= 0) return 'El campo monto/amount debe ser mayor a 0';
     if (!currency) return 'El campo moneda/currency es obligatorio';
     return null;
+}
+
+function validateProviderAccountPayload(provider, body) {
+    const config = body?.configuracion || body?.configuration || {};
+    const apiKey = body?.api_key ?? body?.apiKey ?? null;
+    const secretKey = body?.secret_key ?? body?.secretKey ?? null;
+    const isActive = body?.activo !== false;
+
+    const spec = SUPPORTED_PROVIDER_ACCOUNTS[provider];
+    if (!spec) {
+        throw new BusinessError(`Proveedor no soportado para configuración: ${provider}`, {
+            code: 'UNSUPPORTED_PROVIDER_ACCOUNT',
+            statusCode: 400,
+        });
+    }
+
+    for (const field of spec.requiredConfig) {
+        if (field === 'acceptedBrands') {
+            if (!Array.isArray(config.acceptedBrands) || config.acceptedBrands.length === 0) {
+                throw new BusinessError('acceptedBrands es obligatorio para card_simulated', {
+                    code: 'PROVIDER_ACCOUNT_INVALID_PAYLOAD',
+                    statusCode: 400,
+                });
+            }
+            continue;
+        }
+
+        if (!String(config[field] || '').trim()) {
+            throw new BusinessError(`Campo obligatorio faltante: ${field}`, {
+                code: 'PROVIDER_ACCOUNT_INVALID_PAYLOAD',
+                statusCode: 400,
+            });
+        }
+    }
+
+    if (provider === 'paypal_mock') {
+        const merchantEmail = String(config.merchantEmail || '');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(merchantEmail)) {
+            throw new BusinessError('merchantEmail no tiene formato válido', {
+                code: 'PROVIDER_ACCOUNT_INVALID_EMAIL',
+                statusCode: 400,
+            });
+        }
+    }
+
+    if (provider === 'card_simulated') {
+        const supportEmail = String(config.supportEmail || '');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)) {
+            throw new BusinessError('supportEmail no tiene formato válido', {
+                code: 'PROVIDER_ACCOUNT_INVALID_EMAIL',
+                statusCode: 400,
+            });
+        }
+    }
+
+    return {
+        providerType: spec.type,
+        apiKey: apiKey ? String(apiKey).trim() : null,
+        secretKey: secretKey ? String(secretKey).trim() : null,
+        configuracion: config,
+        activo: isActive,
+    };
+}
+
+function maskSecret(value) {
+    const str = String(value || '');
+    if (!str) return null;
+    if (str.length <= 6) return '*'.repeat(str.length);
+    return `${str.slice(0, 3)}***${str.slice(-3)}`;
+}
+
+function normalizeProviderAccountRow(row) {
+    return {
+        id: row.id,
+        provider: String(row.provider_name || '').toLowerCase(),
+        provider_type: row.provider_type || null,
+        activo: row.activo !== false,
+        api_key_masked: maskSecret(row.api_key),
+        secret_key_masked: maskSecret(row.secret_key),
+        configuracion: row.configuracion || {},
+    };
 }
 
 async function createPayment(req, res) {
@@ -377,6 +469,63 @@ async function getPaymentsMonitor(req, res) {
     }
 }
 
+async function getProviderAccounts(req, res) {
+    try {
+        const empresaId = req.empresaId;
+        const rows = await paymentModel.getProviderAccountsByEmpresa(empresaId);
+        const data = rows.map(normalizeProviderAccountRow);
+
+        return res.status(200).json({
+            success: true,
+            count: data.length,
+            data,
+        });
+    } catch (error) {
+        logger.error(`getProviderAccounts: ${error.message}`);
+        return res.status(500).json({
+            error: 'Error obteniendo configuración de proveedores',
+            code: 'PROVIDER_ACCOUNTS_FETCH_FAILED',
+        });
+    }
+}
+
+async function upsertProviderAccount(req, res) {
+    try {
+        const empresaId = req.empresaId;
+        const provider = String(req.params.provider || '').trim().toLowerCase();
+
+        const payload = validateProviderAccountPayload(provider, req.body || {});
+        const result = await paymentModel.upsertProviderAccountByEmpresa({
+            empresaId,
+            providerName: provider,
+            providerType: payload.providerType,
+            apiKey: payload.apiKey,
+            secretKey: payload.secretKey,
+            configuracion: payload.configuracion,
+            activo: payload.activo,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Cuenta de cobro actualizada correctamente',
+            data: normalizeProviderAccountRow(result),
+        });
+    } catch (error) {
+        if (error instanceof BusinessError) {
+            return res.status(error.statusCode).json({
+                error: error.message,
+                code: error.code,
+            });
+        }
+
+        logger.error(`upsertProviderAccount: ${error.message}`);
+        return res.status(500).json({
+            error: 'Error guardando configuración de proveedor',
+            code: 'PROVIDER_ACCOUNT_UPSERT_FAILED',
+        });
+    }
+}
+
 module.exports = {
     createPayment,
     refundPayment,
@@ -388,4 +537,6 @@ module.exports = {
     paymentHealthCheck,
     getStripeConfig,
 	getPaymentsMonitor,
+    getProviderAccounts,
+    upsertProviderAccount,
 };

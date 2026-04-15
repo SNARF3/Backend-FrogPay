@@ -294,6 +294,112 @@ async function getRecentPaymentsForTenant(empresaId, limit = 30) {
 	return rows;
 }
 
+async function getOrCreateProvider(providerName, providerType) {
+	const normalizedName = String(providerName || '').trim().toLowerCase();
+	const normalizedType = String(providerType || 'custom').trim().toLowerCase();
+
+	if (!normalizedName) {
+		throw new Error('providerName es requerido');
+	}
+
+	const existing = await pool.query(
+		`SELECT id, nombre, tipo FROM proveedores WHERE LOWER(nombre) = $1 LIMIT 1`,
+		[normalizedName]
+	);
+
+	if (existing.rows.length > 0) {
+		return existing.rows[0];
+	}
+
+	const inserted = await pool.query(
+		`
+			INSERT INTO proveedores (nombre, tipo, activo)
+			VALUES ($1, $2, true)
+			RETURNING id, nombre, tipo
+		`,
+		[normalizedName, normalizedType]
+	);
+
+	return inserted.rows[0];
+}
+
+async function getProviderAccountsByEmpresa(empresaId) {
+	const query = `
+		SELECT
+			ep.id,
+			ep.empresa_id,
+			ep.proveedor_id,
+			p.nombre AS provider_name,
+			p.tipo AS provider_type,
+			ep.api_key,
+			ep.secret_key,
+			ep.configuracion,
+			ep.activo
+		FROM empresa_proveedores ep
+		INNER JOIN proveedores p ON p.id = ep.proveedor_id
+		WHERE ep.empresa_id = $1
+		ORDER BY p.nombre ASC
+	`;
+
+	const { rows } = await pool.query(query, [empresaId]);
+	return rows;
+}
+
+async function upsertProviderAccountByEmpresa({ empresaId, providerName, providerType, apiKey, secretKey, configuracion, activo }) {
+	const provider = await getOrCreateProvider(providerName, providerType);
+
+	const update = await pool.query(
+		`
+			UPDATE empresa_proveedores
+			SET api_key = $1,
+				secret_key = $2,
+				configuracion = $3,
+				activo = $4
+			WHERE empresa_id = $5
+				AND proveedor_id = $6
+			RETURNING id, empresa_id, proveedor_id, api_key, secret_key, configuracion, activo
+		`,
+		[
+			apiKey || null,
+			secretKey || null,
+			JSON.stringify(configuracion || {}),
+			activo !== false,
+			empresaId,
+			provider.id,
+		]
+	);
+
+	if (update.rows.length > 0) {
+		return {
+			...update.rows[0],
+			provider_name: provider.nombre,
+			provider_type: provider.tipo,
+		};
+	}
+
+	const insert = await pool.query(
+		`
+			INSERT INTO empresa_proveedores (empresa_id, proveedor_id, api_key, secret_key, configuracion, activo)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id, empresa_id, proveedor_id, api_key, secret_key, configuracion, activo
+		`,
+		[
+			empresaId,
+			provider.id,
+			apiKey || null,
+			secretKey || null,
+			JSON.stringify(configuracion || {}),
+			activo !== false,
+		]
+	);
+
+	return {
+		...insert.rows[0],
+		provider_name: provider.nombre,
+		provider_type: provider.tipo,
+	};
+}
+
 module.exports = {
 	findByIdempotency,
 	createPayment,
@@ -307,4 +413,6 @@ module.exports = {
 	findPaymentByProviderTransaction,
 	hasRefundForProviderTransaction,
 	getRecentPaymentsForTenant,
+	getProviderAccountsByEmpresa,
+	upsertProviderAccountByEmpresa,
 };
