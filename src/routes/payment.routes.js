@@ -6,6 +6,7 @@ const {
     createPayment,
     refundPayment,
     getPaymentStatus,
+    getPaymentById,
     registerCard,
     getCards,
     createPayPalOrder,
@@ -15,7 +16,15 @@ const {
 	getPaymentsMonitor,
     getProviderAccounts,
     upsertProviderAccount,
+    getExchangeRate,
+    verifyPaypalCredentials,
+    handlePaypalReturn,
+    handlePaypalCancel,
 } = require('../modules/payments/payment.controller');
+
+// 📌 Callbacks públicos de PayPal (sin auth — redirigidos por PayPal tras aprobación)
+router.get('/paypal/return', handlePaypalReturn);
+router.get('/paypal/cancel', handlePaypalCancel);
 
 router.use(authMiddleware, tenantRateLimit);
 
@@ -42,6 +51,12 @@ router.get('/monitor', getPaymentsMonitor);
 router.get('/provider-accounts', getProviderAccounts);
 router.put('/provider-accounts/:provider', upsertProviderAccount);
 
+// 📌 Verificar credenciales PayPal del tenant
+router.get('/paypal/verify-credentials', verifyPaypalCredentials);
+
+// 📌 Obtener tipo de cambio
+router.get('/exchange-rate', getExchangeRate);
+
 // 📌 Crear pago
 router.post('/', createPayment);
 
@@ -50,5 +65,8 @@ router.post('/:transactionId/refund', refundPayment);
 
 // 📌 Estado del pago
 router.get('/:transactionId/status', getPaymentStatus);
+
+// 📌 Consulta de pago por ID interno (polling QR)
+router.get('/:id', getPaymentById);
 
 module.exports = router;

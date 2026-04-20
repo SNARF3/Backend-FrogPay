@@ -21,9 +21,11 @@ async function createPayment(data) {
 			estado,
 			proveedor,
 			clave_idempotencia,
-			descripcion
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, creado_en, actualizado_en;
+			descripcion,
+			qr_code,
+			qr_url
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, qr_code, qr_url, creado_en, actualizado_en;
 	`;
 
 	const values = [
@@ -34,6 +36,8 @@ async function createPayment(data) {
 		data.proveedor,
 		data.claveIdempotencia || null,
 		data.descripcion || null,
+		data.qrCode || null,
+		data.qrUrl || null,
 	];
 
 	const { rows } = await pool.query(query, values);
@@ -400,6 +404,65 @@ async function upsertProviderAccountByEmpresa({ empresaId, providerName, provide
 	};
 }
 
+async function getPaypalCredentialsByEmpresa(empresaId) {
+	const query = `
+		SELECT ep.api_key AS client_id, ep.secret_key AS client_secret
+		FROM empresa_proveedores ep
+		INNER JOIN proveedores p ON p.id = ep.proveedor_id
+		WHERE ep.empresa_id = $1 AND LOWER(p.nombre) = 'paypal' AND ep.activo = true
+		LIMIT 1;
+	`;
+	const { rows } = await pool.query(query, [empresaId]);
+	if (!rows[0] || !rows[0].client_id || !rows[0].client_secret) return null;
+	return { clientId: rows[0].client_id, clientSecret: rows[0].client_secret };
+}
+
+async function findPaymentById(paymentId) {
+	const query = `
+		SELECT id, empresa_id, monto, moneda, estado, proveedor, qr_code, qr_url, clave_idempotencia, descripcion, creado_en, actualizado_en
+		FROM pagos
+		WHERE id = $1
+		LIMIT 1;
+	`;
+	const { rows } = await pool.query(query, [paymentId]);
+	return rows[0] || null;
+}
+
+async function findPaymentByIdAndEmpresa(paymentId, empresaId) {
+	const query = `
+		SELECT id, empresa_id, monto, moneda, estado, proveedor, qr_code, qr_url, clave_idempotencia, descripcion, creado_en, actualizado_en
+		FROM pagos
+		WHERE id = $1 AND empresa_id = $2
+		LIMIT 1;
+	`;
+	const { rows } = await pool.query(query, [paymentId, empresaId]);
+	return rows[0] || null;
+}
+
+async function updateQrArtefacts(paymentId, empresaId, qrCode, qrUrl) {
+	const query = `
+		UPDATE pagos
+		SET qr_code = $1,
+		    qr_url = $2,
+		    actualizado_en = CURRENT_TIMESTAMP
+		WHERE id = $3 AND empresa_id = $4
+		RETURNING id, qr_code, qr_url;
+	`;
+	const { rows } = await pool.query(query, [qrCode, qrUrl, paymentId, empresaId]);
+	return rows[0] || null;
+}
+
+async function getEnabledPaymentMethods(empresaId) {
+	const query = `
+		SELECT metodos_pago_habilitados
+		FROM empresas
+		WHERE id = $1
+		LIMIT 1;
+	`;
+	const { rows } = await pool.query(query, [empresaId]);
+	return rows[0]?.metodos_pago_habilitados || [];
+}
+
 module.exports = {
 	findByIdempotency,
 	createPayment,
@@ -415,4 +478,9 @@ module.exports = {
 	getRecentPaymentsForTenant,
 	getProviderAccountsByEmpresa,
 	upsertProviderAccountByEmpresa,
+	findPaymentById,
+	findPaymentByIdAndEmpresa,
+	updateQrArtefacts,
+	getEnabledPaymentMethods,
+	getPaypalCredentialsByEmpresa,
 };
