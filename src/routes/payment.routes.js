@@ -17,6 +17,8 @@ const {
     getProviderAccounts,
     upsertProviderAccount,
     getExchangeRate,
+    getCurrencyConfig,
+    updateCurrencyConfig,
     verifyPaypalCredentials,
     handlePaypalReturn,
     handlePaypalCancel,
@@ -40,6 +42,10 @@ router.post('/paypal/capture-order', capturePayPalOrder);
 
 // 📌 Configuración pública para frontend (Stripe)
 router.get('/config/stripe', getStripeConfig);
+
+// 📌 Configuración de moneda operativa + tipo de cambio
+router.get('/currency-config', getCurrencyConfig);
+router.put('/currency-config', updateCurrencyConfig);
 
 // 📌 Health check de pagos
 router.get('/health-check', paymentHealthCheck);
