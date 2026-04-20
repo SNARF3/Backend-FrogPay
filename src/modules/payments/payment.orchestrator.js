@@ -49,6 +49,18 @@ class PaymentOrchestrator {
 
 		const provider = providerRegistry.resolve(providerName);
 
+		let providerCreds = {};
+		if (providerName === 'paypal') {
+			const tenantCreds = await paymentModel.getPaypalCredentialsByEmpresa(empresaId);
+			if (!tenantCreds) {
+				throw new BusinessError(
+					'No hay credenciales de PayPal configuradas para este tenant. Configúralas en Configuración → PayPal.',
+					{ code: 'PAYPAL_CREDENTIALS_NOT_CONFIGURED', statusCode: 400 }
+				);
+			}
+			providerCreds = tenantCreds;
+		}
+
 		try {
 			const result = await executeWithRetry(
 				async () => provider.charge({
@@ -59,6 +71,7 @@ class PaymentOrchestrator {
 					token: context.token,
 					description: context.payment.descripcion,
 					metadata: context.metadata,
+					...providerCreds,
 				}),
 				{
 					maxRetries: 2,
@@ -70,7 +83,21 @@ class PaymentOrchestrator {
 
 			if (result.status === 'PENDING') {
 				await paymentModel.updatePaymentStatus(paymentId, empresaId, 'PENDING');
-				await paymentModel.updateQrArtefacts(paymentId, empresaId, result.qrCode, result.qrUrl);
+
+				if (result.qrCode || result.qrUrl) {
+					await paymentModel.updateQrArtefacts(paymentId, empresaId, result.qrCode, result.qrUrl);
+				}
+
+				// For PayPal: insert a PENDING transaction so the return callback can find the payment by orderId
+				if (providerName === 'paypal' && providerTransactionId) {
+					await paymentModel.insertTransaction({
+						pagoId: paymentId,
+						idTransaccionProveedor: providerTransactionId,
+						estado: 'PENDING',
+						codigoRespuesta: 'PAYPAL_PENDING',
+						mensajeRespuesta: 'Esperando aprobación del comprador en PayPal',
+					});
+				}
 
 				await auditLogger.recordPaymentEvent({
 					empresaId,
@@ -88,7 +115,8 @@ class PaymentOrchestrator {
 					providerTransactionId,
 					qrCode: result.qrCode,
 					qrUrl: result.qrUrl,
-					message: result.message || 'QR generado. Escanea para confirmar el pago.',
+					approvalUrl: result.approvalUrl || null,
+					message: result.message || 'Pago pendiente de confirmación.',
 				};
 			}
 
@@ -165,11 +193,17 @@ class PaymentOrchestrator {
 	}
 
 	// 🔁 Refund (reintegrado)
-	async processRefund({ proveedor, transactionId, monto }) {
+	async processRefund({ proveedor, transactionId, monto, empresaId }) {
 		const provider = providerRegistry.resolve(proveedor);
 
+		let creds = {};
+		if (proveedor === 'paypal' && empresaId) {
+			const tenantCreds = await paymentModel.getPaypalCredentialsByEmpresa(empresaId);
+			if (tenantCreds) creds = tenantCreds;
+		}
+
 		try {
-			return await provider.refund({ transactionId, amount: monto });
+			return await provider.refund({ transactionId, amount: monto, ...creds });
 		} catch (error) {
 			if (error instanceof BusinessError) throw error;
 
@@ -181,11 +215,17 @@ class PaymentOrchestrator {
 	}
 
 	// 🔍 Status (reintegrado)
-	async getPaymentStatus({ proveedor, transactionId }) {
+	async getPaymentStatus({ proveedor, transactionId, empresaId }) {
 		const provider = providerRegistry.resolve(proveedor);
 
+		let creds = {};
+		if (proveedor === 'paypal' && empresaId) {
+			const tenantCreds = await paymentModel.getPaypalCredentialsByEmpresa(empresaId);
+			if (tenantCreds) creds = tenantCreds;
+		}
+
 		try {
-			return await provider.getStatus(transactionId);
+			return await provider.getStatus(transactionId, creds);
 		} catch (error) {
 			if (error instanceof BusinessError) throw error;
 
