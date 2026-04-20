@@ -45,7 +45,8 @@ const registerTenant = async (req, res) => {
         res.status(201).json({
             mensaje: "Empresa registrada con éxito.",
             empresa_id: empresaId,
-            api_key: plainApiKey // Enviamos la llave para que el Frontend la muestre
+            api_key: plainApiKey, // Enviamos la llave para que el Frontend la muestre
+            nombre_empresa: nombre_empresa // Agregar nombre
         });
 
     } catch (error) {
