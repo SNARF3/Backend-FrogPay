@@ -16,6 +16,7 @@ const {
 	getPaymentsMonitor,
     getProviderAccounts,
     upsertProviderAccount,
+    getExchangeRate,
 } = require('../modules/payments/payment.controller');
 
 router.use(authMiddleware, tenantRateLimit);
@@ -42,6 +43,9 @@ router.get('/monitor', getPaymentsMonitor);
 // 📌 Configuración de cuentas de cobro por tenant (mock/simulado)
 router.get('/provider-accounts', getProviderAccounts);
 router.put('/provider-accounts/:provider', upsertProviderAccount);
+
+// 📌 Obtener tipo de cambio
+router.get('/exchange-rate', getExchangeRate);
 
 // 📌 Crear pago
 router.post('/', createPayment);

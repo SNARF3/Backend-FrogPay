@@ -6,11 +6,13 @@ const paymentRoutes = require('./payment.routes');
 const webhookRoutes = require('./webhook.routes');
 const financeRoutes = require('./finance.routes');
 const qrApiRoutes = require('./qr.api.routes');
+const currencyRoutes = require('../modules/currencies/currency.routes');
 
 router.use('/tenants', tenantRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/webhooks', webhookRoutes);
 router.use('/finances', financeRoutes);
 router.use('/qr', qrApiRoutes);
+router.use('/currencies', currencyRoutes);
 
 module.exports = router;
