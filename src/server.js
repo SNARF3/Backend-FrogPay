@@ -13,6 +13,7 @@ app.listen(PORT, '0.0.0.0', () => {
     if (enableWebhooks) {
         webhookWorker.start();
         webhookPolling.start();
+        console.log('[Webhooks] Desactivados temporalmente (Redis no disponible).');
     } else {
         console.log('[Webhooks] Desactivados. Define ENABLE_WEBHOOKS=true para habilitarlos.');
     }
