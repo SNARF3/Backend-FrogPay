@@ -2,6 +2,8 @@ const pool = require('../../config/database');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { loginEmpresa } = require('./tenant.service');
+const { getMonthlyUsageStats } = require('../../common/limits');
+
 const registerTenant = async (req, res) => {
     // Obtenemos una conexión exclusiva para hacer una transacción segura
     const client = await pool.connect();
@@ -24,7 +26,7 @@ const registerTenant = async (req, res) => {
             nombre_empresa, 
             correo_empresa, 
             plainApiKey,
-            'freemium', 
+            'FREEMIUM', 
             'activo'
         ]);
         const empresaId = empresaResult.rows[0].id;
@@ -89,5 +91,26 @@ const loginTenant = async (req, res) => {
     }
 };
 
+const getTenantUsage = async (req, res) => {
+    try {
+        const empresaId = req.empresaId;
+        const plan = req.plan;
 
-module.exports = { registerTenant , loginTenant};
+        if (!empresaId) {
+            return res.status(401).json({ error: "No autorizado" });
+        }
+
+        const stats = await getMonthlyUsageStats(empresaId, plan);
+
+        res.status(200).json({
+            success: true,
+            data: stats
+        });
+    } catch (error) {
+        console.error("Error en getTenantUsage:", error);
+        res.status(500).json({ error: "Error interno al obtener estadísticas de uso." });
+    }
+};
+
+
+module.exports = { registerTenant , loginTenant, getTenantUsage };

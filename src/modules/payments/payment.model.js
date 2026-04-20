@@ -29,8 +29,8 @@ async function createPayment(data) {
 			clave_idempotencia,
 			descripcion,
 			qr_code,
-			qr_url,
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			qr_url
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, original_amount, original_currency, exchange_rate, converted_amount, base_currency, exchange_rate_timestamp, creado_en, actualizado_en;
 	`;
 
@@ -184,7 +184,7 @@ async function getCompanyPlan(empresaId) {
 		`SELECT plan FROM empresas WHERE id = $1 LIMIT 1;`,
 		[empresaId]
 	);
-	return rows[0]?.plan || 'freemium';
+	return rows[0]?.plan || 'FREEMIUM';
 }
 
 async function getMonthlyUsage(empresaId) {
