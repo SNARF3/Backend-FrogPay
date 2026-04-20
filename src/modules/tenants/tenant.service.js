@@ -32,13 +32,14 @@ const loginEmpresa = async (correo, password) => {
             empresaId: data.empresa_id,
             empresa: data.nombre,
             rol: data.rol,
-            plan: data.plan
+            plan: data.plan,
+            moneda_operativa: data.moneda_operativa || 'USD',
         },
         process.env.JWT_SECRET,
         { expiresIn: '2h' }
     );
 
-    
+
     await insertAuditoriaLogin(data.empresa_id, data.usuario_id);
 
     return {
@@ -47,7 +48,8 @@ const loginEmpresa = async (correo, password) => {
         empresa: {
             id: data.empresa_id,
             nombre: data.nombre,
-            plan: data.plan
+            plan: data.plan,
+            moneda_operativa: data.moneda_operativa || 'USD',
         }
     };
 };

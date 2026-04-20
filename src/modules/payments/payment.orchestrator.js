@@ -39,6 +39,12 @@ class PaymentOrchestrator {
 			from: 'INITIATED',
 			to: 'PROCESSING',
 			provider: providerName,
+				metadata: {
+					originalCurrency: context.payment.original_currency || context.payment.moneda,
+					baseCurrency: context.payment.base_currency || context.payment.moneda,
+					exchangeRate: context.payment.exchange_rate || 1,
+					exchangeRateTimestamp: context.payment.exchange_rate_timestamp || null,
+				},
 		});
 
 		const provider = providerRegistry.resolve(providerName);
@@ -133,6 +139,12 @@ class PaymentOrchestrator {
 				to: 'COMPLETED',
 				provider: providerName,
 				providerTransactionId,
+				metadata: {
+					originalCurrency: context.payment.original_currency || context.payment.moneda,
+					baseCurrency: context.payment.base_currency || context.payment.moneda,
+					exchangeRate: context.payment.exchange_rate || 1,
+					exchangeRateTimestamp: context.payment.exchange_rate_timestamp || null,
+				},
 			});
 
 			return {
@@ -161,6 +173,12 @@ class PaymentOrchestrator {
 				provider: providerName,
 				errorCode: error.code || 'PAYMENT_FAILED',
 				errorMessage: error.message,
+				metadata: {
+					originalCurrency: context.payment.original_currency || context.payment.moneda,
+					baseCurrency: context.payment.base_currency || context.payment.moneda,
+					exchangeRate: context.payment.exchange_rate || 1,
+					exchangeRateTimestamp: context.payment.exchange_rate_timestamp || null,
+				},
 			});
 
 			if (error instanceof BusinessError) {
