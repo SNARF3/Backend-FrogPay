@@ -20,6 +20,7 @@
   "homepage": "https://github.com/SNARF3/Backend-FrogPay#readme",
   "description": "",
   "dependencies": {
+    "axios": "^1.15.1",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.73.0",
