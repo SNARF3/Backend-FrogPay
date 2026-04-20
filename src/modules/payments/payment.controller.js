@@ -8,7 +8,6 @@ const auditLogger = require('../../utils/auditLogger');
 const logger = require('../../utils/logger');
 const pool = require('../../config/database');
 const currencyModel = require('../currencies/currency.model');
-const exchangeRateService = require('../../utils/exchangeRateService');
 const tenantModel = require('../tenants/tenant.model');
 
 // Nuevas importaciones para el manejo de tarjetas
@@ -37,6 +36,7 @@ function detectCardBrandFromToken(cardToken) {
 async function validatePayload(body) {
     if (!body) return 'Payload inválido';
     const amount = body.monto ?? body.amount;
+    const currency = String(body.moneda ?? body.currency ?? '').trim().toUpperCase();
     if (amount === undefined || amount === null || Number(amount) <= 0) return 'El campo monto/amount debe ser mayor a 0';
     if (!currency) return 'El campo moneda/currency es obligatorio';
 
@@ -355,11 +355,11 @@ async function getExchangeRate(req, res) {
         if (!amount || !fromCurrency) {
             return res.status(400).json({ error: 'amount y fromCurrency son requeridos' });
         }
-        const result = await exchangeRateService.calculateConvertedAmount(
-            parseFloat(amount),
-            fromCurrency.toUpperCase(),
-            toCurrency ? toCurrency.toUpperCase() : 'USD'
-        );
+        const result = await exchangeRateService.convertAmount({
+            amount: parseFloat(amount),
+            fromCurrency: fromCurrency.toUpperCase(),
+            toCurrency: toCurrency ? toCurrency.toUpperCase() : 'USD',
+        });
         res.json({
             success: true,
             data: result,
