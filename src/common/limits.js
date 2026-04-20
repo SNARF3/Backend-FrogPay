@@ -14,15 +14,38 @@ const FREEMIUM_MONTHLY_LIMIT_USD = 50_000;
  * @returns {Promise<number>} - Suma total en USD del mes actual
  */
 async function getMonthlyVolumeUSD(empresaId) {
+    if (!empresaId) return 0;
+
+    // Limpiamos el ID por si acaso llega con espacios
+    const id = String(empresaId).trim();
+
     const query = `
-        SELECT COALESCE(SUM(converted_amount), 0) AS total_usd
+        SELECT COALESCE(SUM(COALESCE(converted_amount, monto, 0)), 0) AS total_usd
         FROM pagos
-        WHERE empresa_id = $1
-          AND estado IN ('COMPLETED', 'PROCESSING')
-          AND date_trunc('month', creado_en) = date_trunc('month', CURRENT_DATE);
+        WHERE empresa_id = $1::uuid
+          AND estado NOT IN ('FAILED', 'CANCELLED', 'REFUNDED')
+          AND creado_en >= date_trunc('month', now());
     `;
-    const { rows } = await pool.query(query, [empresaId]);
-    return Number(rows[0].total_usd);
+
+    // Diagnóstico rápido
+    const diagQuery = `SELECT COUNT(*) as cuenta FROM pagos WHERE empresa_id = $1::uuid`;
+
+    try {
+        const { rows } = await pool.query(query, [id]);
+        const diag = await pool.query(diagQuery, [id]);
+
+        const total = parseFloat(rows[0].total_usd || 0);
+        const totalFilas = diag.rows[0].cuenta;
+
+        console.log(`[DEBUG] EmpresaID: ${id}`);
+        console.log(`[DEBUG] Pagos encontrados (total): ${totalFilas}`);
+        console.log(`[DEBUG] Volumen de este mes: ${total} USD`);
+
+        return total;
+    } catch (error) {
+        console.error(`[ERROR] Fallo en cálculo de volumen mensual:`, error.message);
+        return 0;
+    }
 }
 
 /**

@@ -206,10 +206,15 @@ const getTenantUsage = async (req, res) => {
             return res.status(401).json({ error: "No autorizado" });
         }
 
+        // Recuperar nombre para confirmar identidad en el log/respuesta
+        const { rows } = await pool.query('SELECT nombre FROM empresas WHERE id = $1', [empresaId]);
+        const nombreEmpresa = rows[0]?.nombre || 'Empresa desconocida';
+
         const stats = await getMonthlyUsageStats(empresaId, plan);
 
         res.status(200).json({
             success: true,
+            empresa: nombreEmpresa, // Identificador visual
             data: stats
         });
     } catch (error) {
