@@ -18,6 +18,7 @@ const authMiddleware = async (req, res, next) => {
                 
                 req.empresaId = decoded.empresaId;
                 req.usuarioId = decoded.usuarioId || decoded.sub; 
+                req.plan = decoded.plan || 'freemium';
                 
                 if (!req.empresaId) {
                     return res.status(401).json({ error: "Token válido, pero sin empresa asignada." });
@@ -43,14 +44,19 @@ const authMiddleware = async (req, res, next) => {
 
         // Hashear la API Key recibida para comparar con la almacenada
         const hashedIncomingKey = crypto.createHash('sha256').update(apiKeyHeader).digest('hex');
-        const queryText = `SELECT id, estado FROM empresas WHERE api_key = $1 OR api_key = $2;`;
+        const queryText = `SELECT id, estado, plan FROM empresas WHERE api_key = $1 OR api_key = $2;`;
         const { rows } = await pool.query(queryText, [hashedIncomingKey, apiKeyHeader]);
 
         if (rows.length === 0) {
             return res.status(401).json({ error: "API Key inválida." });
         }
 
+        if (rows[0].estado !== 'activo') {
+            return res.status(403).json({ error: 'Empresa inactiva.' });
+        }
+
         req.empresaId = rows[0].id;
+        req.plan = rows[0].plan || 'freemium';
         next();
 
     } catch (error) {

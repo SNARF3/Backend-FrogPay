@@ -9,7 +9,8 @@ const findUserByCorreo = async (correo) => {
             e.id AS empresa_id,
             e.nombre,
             e.estado,
-            e.plan
+            e.plan,
+            e.api_key
         FROM usuarios u
         INNER JOIN empresas e ON u.empresa_id = e.id
         WHERE u.correo = $1

@@ -1,6 +1,8 @@
 const mockProvider = require('./mock.provider');
 const paypalProvider = require('./paypal.provider');
 const cardProvider = require('./card.provider');
+const stripeProvider = require('./stripe.provider');
+const qrProvider = require('./qr.provider');
 const { BusinessError } = require('../../utils/errors');
 
 class ProviderRegistry {
@@ -38,5 +40,7 @@ const providerRegistry = new ProviderRegistry();
 providerRegistry.register('mock', mockProvider);
 providerRegistry.register('paypal', paypalProvider);
 providerRegistry.register('card', cardProvider);
+providerRegistry.register('stripe', stripeProvider);
+providerRegistry.register('qr', qrProvider);
 
 module.exports = providerRegistry;

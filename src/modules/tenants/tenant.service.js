@@ -40,6 +40,7 @@ const loginEmpresa = async (correo, password) => {
 
     return {
         token,
+        api_key: data.api_key,
         empresa: {
             id: data.empresa_id,
             nombre: data.nombre,

@@ -12,9 +12,8 @@ const registerTenant = async (req, res) => {
 
         await client.query('BEGIN'); // Iniciamos transacción
 
-        // 1. Generar la API Key y su Hash (para la máquina)
+        // 1. Generar la API Key única por tenant
         const plainApiKey = 'fp_live_' + crypto.randomBytes(32).toString('hex');
-        const hashedApiKey = crypto.createHash('sha256').update(plainApiKey).digest('hex');
 
         // 2. Guardar la empresa
         const insertEmpresaQuery = `
@@ -24,7 +23,7 @@ const registerTenant = async (req, res) => {
         const empresaResult = await client.query(insertEmpresaQuery, [
             nombre_empresa, 
             correo_empresa, 
-            hashedApiKey, 
+            plainApiKey,
             'freemium', 
             'activo'
         ]);
@@ -46,7 +45,8 @@ const registerTenant = async (req, res) => {
         res.status(201).json({
             mensaje: "Empresa registrada con éxito.",
             empresa_id: empresaId,
-            api_key: plainApiKey // Enviamos la llave para que el Frontend la muestre
+            api_key: plainApiKey, // Enviamos la llave para que el Frontend la muestre
+            nombre_empresa: nombre_empresa // Agregar nombre
         });
 
     } catch (error) {

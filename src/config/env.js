@@ -1,5 +1,6 @@
 const env = {
   PORT: process.env.PORT,
+  NODE_ENV: process.env.NODE_ENV || 'development',
   JWT_SECRET: process.env.JWT_SECRET,
   DB_USER: process.env.DB_USER,
   DB_HOST: process.env.DB_HOST,
@@ -9,7 +10,17 @@ const env = {
   PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID,
   PAYPAL_CLIENT_SECRET: process.env.PAYPAL_CLIENT_SECRET,
   PAYPAL_BASE_URL: process.env.PAYPAL_BASE_URL,
+  PAYPAL_REQUEST_TIMEOUT_MS: Number(process.env.PAYPAL_REQUEST_TIMEOUT_MS || 10000),
+  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+  STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY,
   DEFAULT_PROVIDER: process.env.DEFAULT_PROVIDER,
+  CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173',
+  RATE_LIMIT_WINDOW_MS: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
+  RATE_LIMIT_PUBLIC_MAX: Number(process.env.RATE_LIMIT_PUBLIC_MAX || 60),
+  RATE_LIMIT_FREE_MAX: Number(process.env.RATE_LIMIT_FREE_MAX || 20),
+  RATE_LIMIT_PRO_MAX: Number(process.env.RATE_LIMIT_PRO_MAX || 80),
+  FREE_MONTHLY_TX_LIMIT: Number(process.env.FREE_MONTHLY_TX_LIMIT || 100),
+  APP_BASE_URL: process.env.APP_BASE_URL || 'http://localhost:3000',
 };
 
 module.exports = env;

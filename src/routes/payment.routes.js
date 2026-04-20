@@ -1,44 +1,72 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middlewares/auth.middleware');
+const { tenantRateLimit } = require('../middlewares/rateLimit.middleware');
 const {
     createPayment,
     refundPayment,
     getPaymentStatus,
+    getPaymentById,
     registerCard,
     getCards,
-    getPaymentEventsController,
-    getTimelineController,
-    getTransactionsController,
-    getAuditController,
-    getErrorsController,
-    createPaypalOrder,
-    capturePaypalOrder,
-
+    createPayPalOrder,
+    capturePayPalOrder,
+    paymentHealthCheck,
+    getStripeConfig,
+	getPaymentsMonitor,
+    getProviderAccounts,
+    upsertProviderAccount,
+    getExchangeRate,
+    verifyPaypalCredentials,
+    handlePaypalReturn,
+    handlePaypalCancel,
 } = require('../modules/payments/payment.controller');
 
+// 📌 Callbacks públicos de PayPal (sin auth — redirigidos por PayPal tras aprobación)
+router.get('/paypal/return', handlePaypalReturn);
+router.get('/paypal/cancel', handlePaypalCancel);
+
+router.use(authMiddleware, tenantRateLimit);
+
 // 📌 Registrar tarjeta (PROTEGIDO)
-router.post('/cards', authMiddleware, registerCard);
+router.post('/cards', registerCard);
 
 // 📌 Listar tarjetas de la empresa (PROTEGIDO)
-router.get('/cards', authMiddleware, getCards);
+router.get('/cards', getCards);
 
-// 📌 PayPal — flujo de 2 pasos
-router.post('/paypal/create-order', authMiddleware, createPaypalOrder);
-router.post('/paypal/capture-order', authMiddleware, capturePaypalOrder);
+// 📌 PayPal explícito (flujo approve/capture)
+router.post('/paypal/create-order', createPayPalOrder);
+router.post('/paypal/capture-order', capturePayPalOrder);
+
+// 📌 Configuración pública para frontend (Stripe)
+router.get('/config/stripe', getStripeConfig);
+
+// 📌 Health check de pagos
+router.get('/health-check', paymentHealthCheck);
+
+// 📌 Monitor de pagos + estado de entrega de webhooks
+router.get('/monitor', getPaymentsMonitor);
+
+// 📌 Configuración de cuentas de cobro por tenant (mock/simulado)
+router.get('/provider-accounts', getProviderAccounts);
+router.put('/provider-accounts/:provider', upsertProviderAccount);
+
+// 📌 Verificar credenciales PayPal del tenant
+router.get('/paypal/verify-credentials', verifyPaypalCredentials);
+
+// 📌 Obtener tipo de cambio
+router.get('/exchange-rate', getExchangeRate);
 
 // 📌 Crear pago
-router.post('/', authMiddleware, createPayment);
+router.post('/', createPayment);
 
 // 📌 Reembolso
-router.post('/:transactionId/refund', authMiddleware, refundPayment);
+router.post('/:transactionId/refund', refundPayment);
 
 // 📌 Estado del pago
-router.get('/:transactionId/status', authMiddleware, getPaymentStatus);
+router.get('/:transactionId/status', getPaymentStatus);
 
-router.get('/:id/events', authMiddleware, getPaymentEventsController);
-router.get('/:id/timeline', authMiddleware, getTimelineController);
-router.get('/:id/transactions', authMiddleware, getTransactionsController);
-router.get('/:id/audit', authMiddleware, getAuditController);
-router.get('/:id/errors', authMiddleware, getErrorsController);
+// 📌 Consulta de pago por ID interno (polling QR)
+router.get('/:id', getPaymentById);
+
 module.exports = router;

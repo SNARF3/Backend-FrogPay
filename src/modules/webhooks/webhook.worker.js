@@ -36,6 +36,25 @@ class WebhookWorker {
             }
           };
 
+          // Guard rail idempotente: evita reenviar si ese webhook ya tuvo exito
+          // para el mismo payment_id y estado.
+          const alreadyDelivered = await pool.query(
+            `
+              SELECT 1
+              FROM logs_webhooks l
+              WHERE l.webhook_id = $1
+                AND l.estado = 'success'
+                AND (l.payload->'data'->>'payment_id') = $2
+                AND (l.payload->'data'->>'status') = $3
+              LIMIT 1
+            `,
+            [webhookConfig.id, String(paymentId), String(status)]
+          );
+
+          if (alreadyDelivered.rows.length > 0) {
+            continue;
+          }
+
           let deliveryStatus = 'success';
           let errorInfo = null;
 

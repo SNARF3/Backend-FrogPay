@@ -3,10 +3,14 @@ const router = express.Router();
 
 const { authMiddleware } = require('../middlewares/auth.middleware');
 const { tenantRateLimit } = require('../middlewares/rateLimit.middleware');
-const { getKpis } = require('../modules/finance/finance.controller');
+const {
+  getWebhookConfig,
+  upsertWebhookConfig,
+} = require('../modules/webhooks/webhook.controller');
 
 router.use(authMiddleware, tenantRateLimit);
 
-router.get('/kpis', getKpis);
+router.get('/', getWebhookConfig);
+router.put('/', upsertWebhookConfig);
 
 module.exports = router;
