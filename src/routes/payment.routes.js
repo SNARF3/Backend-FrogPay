@@ -17,7 +17,14 @@ const {
     getProviderAccounts,
     upsertProviderAccount,
     getExchangeRate,
+    verifyPaypalCredentials,
+    handlePaypalReturn,
+    handlePaypalCancel,
 } = require('../modules/payments/payment.controller');
+
+// 📌 Callbacks públicos de PayPal (sin auth — redirigidos por PayPal tras aprobación)
+router.get('/paypal/return', handlePaypalReturn);
+router.get('/paypal/cancel', handlePaypalCancel);
 
 router.use(authMiddleware, tenantRateLimit);
 
@@ -43,6 +50,9 @@ router.get('/monitor', getPaymentsMonitor);
 // 📌 Configuración de cuentas de cobro por tenant (mock/simulado)
 router.get('/provider-accounts', getProviderAccounts);
 router.put('/provider-accounts/:provider', upsertProviderAccount);
+
+// 📌 Verificar credenciales PayPal del tenant
+router.get('/paypal/verify-credentials', verifyPaypalCredentials);
 
 // 📌 Obtener tipo de cambio
 router.get('/exchange-rate', getExchangeRate);
