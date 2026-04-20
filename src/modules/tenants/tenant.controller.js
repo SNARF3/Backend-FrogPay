@@ -1,7 +1,7 @@
 const pool = require('../../config/database');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
-const { loginEmpresa } = require('./tenant.service');
+const { loginEmpresa, getTenantPlan, upgradeTenantPlan, downgradeTenantPlan } = require('./tenant.service');
 const registerTenant = async (req, res) => {
     // Obtenemos una conexión exclusiva para hacer una transacción segura
     const client = await pool.connect();
@@ -24,7 +24,7 @@ const registerTenant = async (req, res) => {
             nombre_empresa, 
             correo_empresa, 
             plainApiKey,
-            'freemium', 
+            'FREEMIUM', 
             'activo'
         ]);
         const empresaId = empresaResult.rows[0].id;
@@ -89,4 +89,113 @@ const loginTenant = async (req, res) => {
 };
 
 
-module.exports = { registerTenant , loginTenant};
+
+/**
+ * GET /api/tenants/me
+ * Retorna la información actual del tenant autenticado, incluyendo su plan.
+ */
+const getTenantMe = async (req, res) => {
+    try {
+        const empresaId = req.empresaId;
+        if (!empresaId) {
+            return res.status(401).json({ error: 'No autenticado.' });
+        }
+
+        const empresa = await getTenantPlan(empresaId);
+
+        return res.status(200).json({
+            id: empresa.id,
+            nombre: empresa.nombre,
+            correo: empresa.correo,
+            plan: empresa.plan,
+            estado: empresa.estado,
+            metodos_pago_habilitados: empresa.metodos_pago_habilitados,
+            creado_en: empresa.creado_en
+        });
+    } catch (error) {
+        console.error('getTenantMe:', error.message);
+        if (error.message === 'Empresa no encontrada') {
+            return res.status(404).json({ error: error.message });
+        }
+        return res.status(500).json({ error: 'Error interno al obtener datos del tenant.' });
+    }
+};
+
+/**
+ * PUT /api/tenants/upgrade
+ * Actualiza el plan del tenant autenticado a PREMIUM.
+ * Registra un evento de auditoría del cambio.
+ */
+const upgradePlan = async (req, res) => {
+    try {
+        const empresaId = req.empresaId;
+        if (!empresaId) {
+            return res.status(401).json({ error: 'No autenticado.' });
+        }
+
+        const resultado = await upgradeTenantPlan(empresaId);
+
+        return res.status(200).json({
+            mensaje: 'Plan actualizado a PREMIUM exitosamente.',
+            empresa: {
+                id: resultado.id,
+                nombre: resultado.nombre,
+                plan: resultado.plan
+            }
+        });
+    } catch (error) {
+        console.error('upgradePlan:', error.message);
+
+        // Errores de negocio conocidos
+        if (
+            error.message === 'Empresa no encontrada' ||
+            error.message.startsWith('La empresa ya cuenta') ||
+            error.message.startsWith('No se puede hacer upgrade') ||
+            error.message.startsWith('Plan inválido')
+        ) {
+            return res.status(409).json({ error: error.message });
+        }
+
+        return res.status(500).json({ error: 'Error interno al actualizar el plan.' });
+    }
+};
+
+/**
+ * PUT /api/tenants/downgrade
+ * Regresa el plan del tenant autenticado a FREEMIUM.
+ * Registra un evento de auditoría del cambio.
+ */
+const downgradePlan = async (req, res) => {
+    try {
+        const empresaId = req.empresaId;
+        if (!empresaId) {
+            return res.status(401).json({ error: 'No autenticado.' });
+        }
+
+        const resultado = await downgradeTenantPlan(empresaId);
+
+        return res.status(200).json({
+            mensaje: 'Plan cambiado a FREEMIUM exitosamente.',
+            empresa: {
+                id: resultado.id,
+                nombre: resultado.nombre,
+                plan: resultado.plan
+            }
+        });
+    } catch (error) {
+        console.error('downgradePlan:', error.message);
+
+        if (
+            error.message === 'Empresa no encontrada' ||
+            error.message.startsWith('La empresa ya se encuentra') ||
+            error.message.startsWith('No se puede hacer downgrade') ||
+            error.message.startsWith('Plan inválido')
+        ) {
+            return res.status(409).json({ error: error.message });
+        }
+
+        return res.status(500).json({ error: 'Error interno al cambiar el plan.' });
+    }
+};
+
+module.exports = { registerTenant, loginTenant, getTenantMe, upgradePlan, downgradePlan };
