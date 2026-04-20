@@ -6,6 +6,8 @@ const env = require('../../config/env');
 const auditLogger = require('../../utils/auditLogger');
 const logger = require('../../utils/logger');
 const pool = require('../../config/database');
+const currencyModel = require('../currencies/currency.model');
+const exchangeRateService = require('../../utils/exchangeRateService');
 
 // Nuevas importaciones para el manejo de tarjetas
 const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
@@ -30,12 +32,17 @@ function detectCardBrandFromToken(cardToken) {
 	return 'UNKNOWN';
 }
 
-function validatePayload(body) {
+async function validatePayload(body) {
     if (!body) return 'Payload inválido';
     const amount = body.monto ?? body.amount;
     const currency = body.moneda ?? body.currency;
     if (amount === undefined || amount === null || Number(amount) <= 0) return 'El campo monto/amount debe ser mayor a 0';
     if (!currency) return 'El campo moneda/currency es obligatorio';
+
+    // Validar que la moneda existe y está habilitada
+    const validCurrency = await currencyModel.getCurrencyByCode(currency);
+    if (!validCurrency) return `La moneda '${currency}' no es válida o no está habilitada`;
+
     return null;
 }
 
@@ -122,7 +129,7 @@ function normalizeProviderAccountRow(row) {
 
 async function createPayment(req, res) {
     try {
-        const validationError = validatePayload(req.body);
+        const validationError = await validatePayload(req.body);
         if (validationError) {
             return res.status(400).json({ error: validationError });
         }
@@ -229,6 +236,30 @@ function getStripeConfig(_req, res) {
         publishableKey: env.STRIPE_PUBLISHABLE_KEY || null,
         enabled: Boolean(env.STRIPE_PUBLISHABLE_KEY),
     });
+}
+
+async function getExchangeRate(req, res) {
+    try {
+        const { amount, fromCurrency, toCurrency } = req.query;
+        if (!amount || !fromCurrency) {
+            return res.status(400).json({ error: 'amount y fromCurrency son requeridos' });
+        }
+        const result = await exchangeRateService.calculateConvertedAmount(
+            parseFloat(amount),
+            fromCurrency.toUpperCase(),
+            toCurrency ? toCurrency.toUpperCase() : 'USD'
+        );
+        res.json({
+            success: true,
+            data: result,
+        });
+    } catch (error) {
+        console.error('Error obteniendo tipo de cambio:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Error interno del servidor',
+        });
+    }
 }
 
 async function refundPayment(req, res) {
@@ -536,6 +567,7 @@ module.exports = {
     capturePayPalOrder,
     paymentHealthCheck,
     getStripeConfig,
+	getExchangeRate,
 	getPaymentsMonitor,
     getProviderAccounts,
     upsertProviderAccount,
