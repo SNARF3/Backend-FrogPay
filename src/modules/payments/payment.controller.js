@@ -1,6 +1,7 @@
 const paymentModel = require('./payment.model');
 const cardModel = require('./card.model');
 const paymentOrchestrator = require('./payment.orchestrator');
+const exchangeRateService = require('./exchangeRate.service');
 const { BusinessError } = require('../../utils/errors');
 const env = require('../../config/env');
 const auditLogger = require('../../utils/auditLogger');
@@ -8,6 +9,7 @@ const logger = require('../../utils/logger');
 const pool = require('../../config/database');
 const currencyModel = require('../currencies/currency.model');
 const exchangeRateService = require('../../utils/exchangeRateService');
+const tenantModel = require('../tenants/tenant.model');
 
 // Nuevas importaciones para el manejo de tarjetas
 const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
@@ -35,7 +37,6 @@ function detectCardBrandFromToken(cardToken) {
 async function validatePayload(body) {
     if (!body) return 'Payload inválido';
     const amount = body.monto ?? body.amount;
-    const currency = body.moneda ?? body.currency;
     if (amount === undefined || amount === null || Number(amount) <= 0) return 'El campo monto/amount debe ser mayor a 0';
     if (!currency) return 'El campo moneda/currency es obligatorio';
 
@@ -139,7 +140,8 @@ async function createPayment(req, res) {
 			|| (String(req.body.payment_method || '').toUpperCase() === 'QR' ? 'qr' : null)
 			|| env.DEFAULT_PROVIDER || 'mock';
 		const monto = req.body.monto ?? req.body.amount;
-		const moneda = req.body.moneda ?? req.body.currency;
+        const monedaPreferida = await tenantModel.getTenantCurrencyPreference(empresaId);
+        const moneda = String(req.body.moneda ?? req.body.currency ?? monedaPreferida ?? env.BASE_CURRENCY ?? 'USD').trim().toUpperCase();
 		const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
 		const descripcion = req.body.descripcion ?? req.body.description ?? null;
         const token = req.body.card_token ?? req.body.token ?? req.body.paymentToken ?? req.body.paymentMethodId ?? null;
@@ -185,11 +187,23 @@ async function createPayment(req, res) {
             }
         }
 
+        const conversion = await exchangeRateService.convertAmount({
+            amount: monto,
+            fromCurrency: moneda,
+            toCurrency: env.BASE_CURRENCY || 'USD',
+        });
+
 		// 💾 Crear pago
 		const payment = await paymentModel.createPayment({
 			empresaId,
-			monto,
-			moneda,
+            monto: conversion.convertedAmount,
+            moneda: conversion.baseCurrency,
+            originalAmount: conversion.originalAmount,
+            originalCurrency: conversion.originalCurrency,
+            exchangeRate: conversion.exchangeRate,
+            convertedAmount: conversion.convertedAmount,
+            baseCurrency: conversion.baseCurrency,
+            exchangeRateTimestamp: conversion.exchangeRateTimestamp,
 			estado: 'INITIATED',
 			proveedor,
 			claveIdempotencia,
@@ -204,6 +218,14 @@ async function createPayment(req, res) {
             from: null,
             to: 'INITIATED',
             provider: proveedor,
+            metadata: {
+                originalAmount: conversion.originalAmount,
+                originalCurrency: conversion.originalCurrency,
+                exchangeRate: conversion.exchangeRate,
+                exchangeRateTimestamp: conversion.exchangeRateTimestamp,
+                convertedAmount: conversion.convertedAmount,
+                baseCurrency: conversion.baseCurrency,
+            },
         });
 
         // ⚙️ Orquestador
@@ -223,6 +245,12 @@ async function createPayment(req, res) {
 			card_brand: cardBrand,
 			id_transaccion_proveedor: result.providerTransactionId,
 			mensaje: result.message,
+            original_amount: conversion.originalAmount,
+            original_currency: conversion.originalCurrency,
+            exchange_rate: conversion.exchangeRate,
+            exchange_rate_timestamp: conversion.exchangeRateTimestamp,
+            converted_amount: conversion.convertedAmount,
+            base_currency: conversion.baseCurrency,
 		};
 
 		if (proveedor === 'qr') {
@@ -244,6 +272,64 @@ async function createPayment(req, res) {
         return res.status(error.statusCode || 500).json({
             error: error.message || 'Error interno al procesar el pago',
             code: error.code || 'INTERNAL_ERROR',
+        });
+    }
+}
+
+async function getCurrencyConfig(req, res) {
+    try {
+        const empresaId = req.empresaId;
+        const config = await exchangeRateService.getCurrencyConfig(empresaId);
+
+        return res.status(200).json({
+            success: true,
+            data: config,
+        });
+    } catch (error) {
+        logger.error(`getCurrencyConfig: ${error.message}`);
+        return res.status(error.statusCode || 500).json({
+            error: error.message || 'No se pudo obtener la configuración de moneda',
+            code: error.code || 'CURRENCY_CONFIG_FAILED',
+        });
+    }
+}
+
+async function updateCurrencyConfig(req, res) {
+    try {
+        const empresaId = req.empresaId;
+        const requestedCurrency = exchangeRateService.normalizeCurrencyCode(req.body?.currency || req.body?.moneda);
+
+        if (!requestedCurrency) {
+            return res.status(400).json({
+                error: 'currency es obligatorio',
+                code: 'CURRENCY_REQUIRED',
+            });
+        }
+
+        const supported = await exchangeRateService.getSupportedCurrencies();
+        const allowed = new Set(supported.map((item) => exchangeRateService.normalizeCurrencyCode(item.codigo)));
+
+        if (!allowed.has(requestedCurrency)) {
+            return res.status(422).json({
+                error: `La moneda ${requestedCurrency} no está habilitada`,
+                code: 'UNSUPPORTED_CURRENCY',
+            });
+        }
+
+        await tenantModel.updateTenantCurrencyPreference(empresaId, requestedCurrency);
+
+        const config = await exchangeRateService.getCurrencyConfig(empresaId);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Moneda operativa actualizada correctamente',
+            data: config,
+        });
+    } catch (error) {
+        logger.error(`updateCurrencyConfig: ${error.message}`);
+        return res.status(error.statusCode || 500).json({
+            error: error.message || 'No se pudo actualizar la moneda operativa',
+            code: error.code || 'CURRENCY_CONFIG_UPDATE_FAILED',
         });
     }
 }
@@ -336,8 +422,9 @@ async function refundPayment(req, res) {
 
 async function createPayPalOrder(req, res) {
     try {
+        const empresaId = req.empresaId;
         const amount = Number(req.body?.amount);
-        const currency = req.body?.currency || 'USD';
+        const requestedCurrency = String(req.body?.currency || req.body?.moneda || await tenantModel.getTenantCurrencyPreference(empresaId) || env.BASE_CURRENCY || 'USD').trim().toUpperCase();
         const description = req.body?.description || 'Pago con PayPal';
 
         if (!amount || amount <= 0) {
@@ -347,9 +434,15 @@ async function createPayPalOrder(req, res) {
             });
         }
 
-        const result = await paypalProvider.createOrder({
+        const conversion = await exchangeRateService.convertAmount({
             amount,
-            currency,
+            fromCurrency: requestedCurrency,
+            toCurrency: env.BASE_CURRENCY || 'USD',
+        });
+
+        const result = await paypalProvider.createOrder({
+            amount: conversion.convertedAmount,
+            currency: conversion.baseCurrency,
             description,
         });
 
@@ -628,4 +721,6 @@ module.exports = {
 	getPaymentsMonitor,
     getProviderAccounts,
     upsertProviderAccount,
+    getCurrencyConfig,
+    updateCurrencyConfig,
 };

@@ -2,7 +2,7 @@ const pool = require('../../config/database');
 
 async function findByIdempotency(empresaId, claveIdempotencia) {
 	const query = `
-		SELECT id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, creado_en, actualizado_en
+		SELECT id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, original_amount, original_currency, exchange_rate, converted_amount, base_currency, exchange_rate_timestamp, creado_en, actualizado_en
 		FROM pagos
 		WHERE empresa_id = $1 AND clave_idempotencia = $2
 		LIMIT 1;
@@ -18,20 +18,32 @@ async function createPayment(data) {
 			empresa_id,
 			monto,
 			moneda,
+			original_amount,
+			original_currency,
+			exchange_rate,
+			converted_amount,
+			base_currency,
+			exchange_rate_timestamp,
 			estado,
 			proveedor,
 			clave_idempotencia,
 			descripcion,
 			qr_code,
-			qr_url
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, qr_code, qr_url, creado_en, actualizado_en;
+			qr_url,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, original_amount, original_currency, exchange_rate, converted_amount, base_currency, exchange_rate_timestamp, creado_en, actualizado_en;
 	`;
 
 	const values = [
 		data.empresaId,
-		data.monto,
-		data.moneda,
+		data.convertedAmount ?? data.monto,
+		data.baseCurrency ?? data.moneda,
+		data.originalAmount ?? data.monto,
+		data.originalCurrency ?? data.moneda,
+		data.exchangeRate ?? 1,
+		data.convertedAmount ?? data.monto,
+		data.baseCurrency ?? data.moneda,
+		data.exchangeRateTimestamp || new Date(),
 		data.estado,
 		data.proveedor,
 		data.claveIdempotencia || null,
@@ -50,7 +62,7 @@ async function updatePaymentStatus(paymentId, empresaId, estado) {
 		SET estado = $1,
 			actualizado_en = CURRENT_TIMESTAMP
 		WHERE id = $2 AND empresa_id = $3
-		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, creado_en, actualizado_en;
+		RETURNING id, empresa_id, monto, moneda, estado, proveedor, clave_idempotencia, descripcion, original_amount, original_currency, exchange_rate, converted_amount, base_currency, exchange_rate_timestamp, creado_en, actualizado_en;
 	`;
 
 	const { rows } = await pool.query(query, [estado, paymentId, empresaId]);
@@ -253,6 +265,12 @@ async function getRecentPaymentsForTenant(empresaId, limit = 30) {
 			p.id,
 			p.monto,
 			p.moneda,
+			p.original_amount,
+			p.original_currency,
+			p.exchange_rate,
+			p.converted_amount,
+			p.base_currency,
+			p.exchange_rate_timestamp,
 			p.estado,
 			p.proveedor,
 			p.descripcion,
