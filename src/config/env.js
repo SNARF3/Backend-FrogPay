@@ -20,6 +20,7 @@ const env = {
   RATE_LIMIT_FREE_MAX: Number(process.env.RATE_LIMIT_FREE_MAX || 20),
   RATE_LIMIT_PRO_MAX: Number(process.env.RATE_LIMIT_PRO_MAX || 80),
   FREE_MONTHLY_TX_LIMIT: Number(process.env.FREE_MONTHLY_TX_LIMIT || 100),
+  APP_BASE_URL: process.env.APP_BASE_URL || 'http://localhost:3000',
 };
 
 module.exports = env;
