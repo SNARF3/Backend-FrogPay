@@ -62,6 +62,30 @@ class PaymentOrchestrator {
 
 			const providerTransactionId = result.providerTransactionId || result.transactionId || result.id || null;
 
+			if (result.status === 'PENDING') {
+				await paymentModel.updatePaymentStatus(paymentId, empresaId, 'PENDING');
+				await paymentModel.updateQrArtefacts(paymentId, empresaId, result.qrCode, result.qrUrl);
+
+				await auditLogger.recordPaymentEvent({
+					empresaId,
+					paymentId,
+					from: 'PROCESSING',
+					to: 'PENDING',
+					provider: providerName,
+					providerTransactionId,
+				});
+
+				return {
+					paymentId,
+					status: 'PENDING',
+					provider: providerName,
+					providerTransactionId,
+					qrCode: result.qrCode,
+					qrUrl: result.qrUrl,
+					message: result.message || 'QR generado. Escanea para confirmar el pago.',
+				};
+			}
+
 			await paymentModel.updatePaymentStatus(paymentId, empresaId, 'COMPLETED');
 
 			await paymentModel.insertTransaction({

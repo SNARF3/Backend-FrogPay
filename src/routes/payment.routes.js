@@ -6,6 +6,7 @@ const {
     createPayment,
     refundPayment,
     getPaymentStatus,
+    getPaymentById,
     registerCard,
     getCards,
     createPayPalOrder,
@@ -50,5 +51,8 @@ router.post('/:transactionId/refund', refundPayment);
 
 // 📌 Estado del pago
 router.get('/:transactionId/status', getPaymentStatus);
+
+// 📌 Consulta de pago por ID interno (polling QR)
+router.get('/:id', getPaymentById);
 
 module.exports = router;

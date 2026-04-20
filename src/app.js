@@ -3,6 +3,7 @@ const cors = require('cors');
 const routes = require('./routes/index');
 const env = require('./config/env');
 const { publicRateLimit } = require('./middlewares/rateLimit.middleware');
+const qrPageRoutes = require('./routes/qr.page.routes');
 
 const app = express();
 
@@ -43,6 +44,7 @@ app.get('/health', (_req, res) => {
 	});
 });
 
+app.use('/pay', qrPageRoutes);
 app.use('/api', routes);
 
 module.exports = app;

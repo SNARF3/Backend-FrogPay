@@ -8,7 +8,7 @@ const webhookPolling = enableWebhooks ? require('./modules/webhooks/webhook.poll
 
 const PORT = process.env.PORT;
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor de FrogPay corriendo en el puerto ${PORT}`);
     if (enableWebhooks) {
         webhookWorker.start();

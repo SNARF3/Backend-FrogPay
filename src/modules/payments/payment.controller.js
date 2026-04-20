@@ -128,7 +128,9 @@ async function createPayment(req, res) {
         }
 
 		const empresaId = req.empresaId;
-		const proveedor = req.body.proveedor || req.body.provider || req.body.paymentProvider || env.DEFAULT_PROVIDER || 'mock';
+		const proveedor = req.body.proveedor || req.body.provider || req.body.paymentProvider
+			|| (String(req.body.payment_method || '').toUpperCase() === 'QR' ? 'qr' : null)
+			|| env.DEFAULT_PROVIDER || 'mock';
 		const monto = req.body.monto ?? req.body.amount;
 		const moneda = req.body.moneda ?? req.body.currency;
 		const claveIdempotencia = req.body.clave_idempotencia || req.body.idempotencyKey || null;
@@ -143,7 +145,18 @@ async function createPayment(req, res) {
 			});
 		}
 
-        // 🔁 Idempotencia
+        // HU-29: Validar que el metodo QR este habilitado para el tenant
+        if (proveedor === 'qr') {
+            const enabledMethods = await paymentModel.getEnabledPaymentMethods(empresaId);
+            if (!enabledMethods.includes('qr')) {
+                return res.status(403).json({
+                    error: 'El metodo de pago QR no esta habilitado para esta empresa.',
+                    code: 'QR_METHOD_NOT_ENABLED',
+                });
+            }
+        }
+
+        // Idempotencia
         if (claveIdempotencia) {
             const existingPayment = await paymentModel.findByIdempotency(
                 empresaId,
@@ -151,12 +164,17 @@ async function createPayment(req, res) {
             );
 
             if (existingPayment) {
-                return res.status(200).json({
+                const replayResponse = {
                     payment_id: existingPayment.id,
                     estado: existingPayment.estado,
                     proveedor: existingPayment.proveedor,
                     idempotent_replay: true,
-                });
+                };
+                if (existingPayment.proveedor === 'qr') {
+                    replayResponse.qr_code = existingPayment.qr_code;
+                    replayResponse.qr_url = existingPayment.qr_url;
+                }
+                return res.status(200).json(replayResponse);
             }
         }
 
@@ -191,14 +209,21 @@ async function createPayment(req, res) {
             metadata: req.body.metadata || {},
         });
 
-		return res.status(201).json({
+		const responseBody = {
 			payment_id: result.paymentId,
 			estado: result.status,
 			proveedor: result.provider,
-            card_brand: cardBrand,
+			card_brand: cardBrand,
 			id_transaccion_proveedor: result.providerTransactionId,
 			mensaje: result.message,
-		});
+		};
+
+		if (proveedor === 'qr') {
+			responseBody.qr_code = result.qrCode;
+			responseBody.qr_url = result.qrUrl;
+		}
+
+		return res.status(201).json(responseBody);
 	} catch (error) {
 		logger.error(`createPayment: ${error.message}`);
 
@@ -526,10 +551,42 @@ async function upsertProviderAccount(req, res) {
     }
 }
 
+async function getPaymentById(req, res) {
+    const paymentId = req.params.id;
+    if (!paymentId || typeof paymentId !== 'string' || !paymentId.trim()) {
+        return res.status(400).json({ error: 'ID de pago invalido', code: 'INVALID_PAYMENT_ID' });
+    }
+
+    const empresaId = req.empresaId;
+
+    try {
+        const payment = await paymentModel.findPaymentByIdAndEmpresa(paymentId, empresaId);
+        if (!payment) {
+            return res.status(404).json({ error: 'Pago no encontrado', code: 'PAYMENT_NOT_FOUND' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            payment_id: payment.id,
+            estado: payment.estado,
+            proveedor: payment.proveedor,
+            monto: payment.monto,
+            moneda: payment.moneda,
+            qr_url: payment.qr_url || null,
+            creado_en: payment.creado_en,
+            actualizado_en: payment.actualizado_en,
+        });
+    } catch (error) {
+        logger.error(`getPaymentById: ${error.message}`);
+        return res.status(500).json({ error: 'Error interno', code: 'INTERNAL_ERROR' });
+    }
+}
+
 module.exports = {
     createPayment,
     refundPayment,
     getPaymentStatus,
+    getPaymentById,
     registerCard,
 	getCards,
     createPayPalOrder,
