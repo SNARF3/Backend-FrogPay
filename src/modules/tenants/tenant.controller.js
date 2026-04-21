@@ -2,6 +2,8 @@ const pool = require('../../config/database');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { loginEmpresa, getTenantPlan, upgradeTenantPlan, downgradeTenantPlan } = require('./tenant.service');
+const { getMonthlyUsageStats } = require('../../common/limits');
+
 const registerTenant = async (req, res) => {
     // Obtenemos una conexión exclusiva para hacer una transacción segura
     const client = await pool.connect();
@@ -21,10 +23,10 @@ const registerTenant = async (req, res) => {
             VALUES ($1, $2, $3, $4, $5) RETURNING id;
         `;
         const empresaResult = await client.query(insertEmpresaQuery, [
-            nombre_empresa, 
-            correo_empresa, 
+            nombre_empresa,
+            correo_empresa,
             plainApiKey,
-            'FREEMIUM', 
+            'FREEMIUM',
             'activo'
         ]);
         const empresaId = empresaResult.rows[0].id;
@@ -52,7 +54,7 @@ const registerTenant = async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK'); // Si algo falla, deshacemos todo
         console.error("Error en registerTenant:", error);
-        
+
         if (error.code === '23505') {
             return res.status(400).json({ error: "Este correo ya está registrado en FrogPay." });
         }
@@ -89,8 +91,6 @@ const loginTenant = async (req, res) => {
     }
 };
 
-
-
 /**
  * GET /api/tenants/me
  * Retorna la información actual del tenant autenticado, incluyendo su plan.
@@ -125,7 +125,6 @@ const getTenantMe = async (req, res) => {
 /**
  * PUT /api/tenants/upgrade
  * Actualiza el plan del tenant autenticado a PREMIUM.
- * Registra un evento de auditoría del cambio.
  */
 const upgradePlan = async (req, res) => {
     try {
@@ -147,12 +146,10 @@ const upgradePlan = async (req, res) => {
     } catch (error) {
         console.error('upgradePlan:', error.message);
 
-        // Errores de negocio conocidos
         if (
             error.message === 'Empresa no encontrada' ||
             error.message.startsWith('La empresa ya cuenta') ||
-            error.message.startsWith('No se puede hacer upgrade') ||
-            error.message.startsWith('Plan inválido')
+            error.message.startsWith('No se puede hacer upgrade')
         ) {
             return res.status(409).json({ error: error.message });
         }
@@ -164,7 +161,6 @@ const upgradePlan = async (req, res) => {
 /**
  * PUT /api/tenants/downgrade
  * Regresa el plan del tenant autenticado a FREEMIUM.
- * Registra un evento de auditoría del cambio.
  */
 const downgradePlan = async (req, res) => {
     try {
@@ -189,8 +185,7 @@ const downgradePlan = async (req, res) => {
         if (
             error.message === 'Empresa no encontrada' ||
             error.message.startsWith('La empresa ya se encuentra') ||
-            error.message.startsWith('No se puede hacer downgrade') ||
-            error.message.startsWith('Plan inválido')
+            error.message.startsWith('No se puede hacer downgrade')
         ) {
             return res.status(409).json({ error: error.message });
         }
@@ -199,4 +194,40 @@ const downgradePlan = async (req, res) => {
     }
 };
 
-module.exports = { registerTenant, loginTenant, getTenantMe, upgradePlan, downgradePlan };
+/**
+ * GET /api/tenants/usage
+ */
+const getTenantUsage = async (req, res) => {
+    try {
+        const empresaId = req.empresaId;
+        const plan = req.plan || 'FREEMIUM';
+
+        if (!empresaId) {
+            return res.status(401).json({ error: "No autorizado" });
+        }
+
+        // Recuperar nombre para confirmar identidad en el log/respuesta
+        const { rows } = await pool.query('SELECT nombre FROM empresas WHERE id = $1', [empresaId]);
+        const nombreEmpresa = rows[0]?.nombre || 'Empresa desconocida';
+
+        const stats = await getMonthlyUsageStats(empresaId, plan);
+
+        res.status(200).json({
+            success: true,
+            empresa: nombreEmpresa, // Identificador visual
+            data: stats
+        });
+    } catch (error) {
+        console.error("Error en getTenantUsage:", error);
+        res.status(500).json({ error: "Error interno al obtener estadísticas de uso." });
+    }
+};
+
+module.exports = { 
+    registerTenant, 
+    loginTenant, 
+    getTenantMe, 
+    upgradePlan, 
+    downgradePlan, 
+    getTenantUsage 
+};
