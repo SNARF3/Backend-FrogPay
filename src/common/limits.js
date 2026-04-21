@@ -16,34 +16,30 @@ const FREEMIUM_MONTHLY_LIMIT_USD = 50_000;
 async function getMonthlyVolumeUSD(empresaId) {
     if (!empresaId) return 0;
 
-    // Limpiamos el ID por si acaso llega con espacios
-    const id = String(empresaId).trim();
-
     const query = `
         SELECT COALESCE(SUM(COALESCE(converted_amount, monto, 0)), 0) AS total_usd
         FROM pagos
-        WHERE empresa_id = $1::uuid
-          AND estado NOT IN ('FAILED', 'CANCELLED', 'REFUNDED')
+        WHERE (empresa_id = $1::uuid OR empresa_id::text = $1::text)
+          AND estado IN ('COMPLETED', 'PROCESSING', 'PENDING')
           AND creado_en >= date_trunc('month', now());
     `;
 
-    // Diagnóstico rápido
-    const diagQuery = `SELECT COUNT(*) as cuenta FROM pagos WHERE empresa_id = $1::uuid`;
+    const diagnosticQuery = `SELECT COUNT(*) as cuenta FROM pagos WHERE empresa_id = $1::uuid`;
 
     try {
-        const { rows } = await pool.query(query, [id]);
-        const diag = await pool.query(diagQuery, [id]);
+        const { rows } = await pool.query(query, [empresaId]);
+        const diag = await pool.query(diagnosticQuery, [empresaId]);
 
         const total = parseFloat(rows[0].total_usd || 0);
         const totalFilas = diag.rows[0].cuenta;
 
-        console.log(`[DEBUG] EmpresaID: ${id}`);
-        console.log(`[DEBUG] Pagos encontrados (total): ${totalFilas}`);
-        console.log(`[DEBUG] Volumen de este mes: ${total} USD`);
+        console.log(`[DEBUG LÍMITES] EmpresaId: ${empresaId}`);
+        console.log(`[DEBUG LÍMITES] Intentos totales (todas las filas): ${totalFilas}`);
+        console.log(`[DEBUG LÍMITES] Volumen real (COMPLETED/PENDING/PROCESSING): ${total} USD`);
 
         return total;
     } catch (error) {
-        console.error(`[ERROR] Fallo en cálculo de volumen mensual:`, error.message);
+        console.error(`[ERROR LÍMITES] Error al calcular volumen:`, error);
         return 0;
     }
 }

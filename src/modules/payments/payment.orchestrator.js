@@ -24,6 +24,16 @@ class PaymentOrchestrator {
 		const limit = getMonthlyLimitByPlan(plan);
 
 		if (usage.total_transacciones >= limit) {
+			await paymentModel.updatePaymentStatus(paymentId, empresaId, 'FAILED');
+			await auditLogger.recordPaymentEvent({
+				empresaId,
+				paymentId,
+				from: 'INITIATED',
+				to: 'FAILED',
+				provider: providerName,
+				metadata: { reason: 'PLAN_TX_LIMIT_EXCEEDED', limit, current: usage.total_transacciones },
+			});
+
 			throw new BusinessError('Tu plan actual alcanzó el límite mensual de transacciones.', {
 				code: 'PLAN_LIMIT_EXCEEDED',
 				statusCode: 402,
@@ -39,6 +49,20 @@ class PaymentOrchestrator {
 		});
 
 		if (!volumeCheck.allowed) {
+			await paymentModel.updatePaymentStatus(paymentId, empresaId, 'FAILED');
+			await auditLogger.recordPaymentEvent({
+				empresaId,
+				paymentId,
+				from: 'INITIATED',
+				to: 'FAILED',
+				provider: providerName,
+				metadata: { 
+					reason: 'VOLUME_LIMIT_EXCEEDED', 
+					limit: volumeCheck.limitUSD, 
+					current: volumeCheck.currentVolumeUSD 
+				},
+			});
+
 			throw new BusinessError('Transacción rechazada. Has superado el límite mensual de $50,000 USD para el plan FREEMIUM.', {
 				code: 'VOLUME_LIMIT_EXCEEDED',
 				statusCode: 402,
