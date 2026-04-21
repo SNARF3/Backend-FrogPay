@@ -223,11 +223,116 @@ const getTenantUsage = async (req, res) => {
     }
 };
 
+/**
+ * PUT /api/tenants/me
+ * Actualiza los datos del tenant autenticado (nombre, correo, teléfono, dirección)
+ */
+const updateTenantMe = async (req, res) => {
+    try {
+        const empresaId = req.empresaId;
+        if (!empresaId) {
+            return res.status(401).json({ error: 'No autenticado.' });
+        }
+
+        const { nombre, correo, telefono, direccion } = req.body;
+
+        if (!nombre || !correo) {
+            return res.status(400).json({ error: 'Nombre y correo son obligatorios.' });
+        }
+
+        const query = `
+            UPDATE empresas 
+            SET nombre = $1, correo = $2, telefono = $3, direccion = $4
+            WHERE id = $5
+            RETURNING id, nombre, correo, telefono, direccion, plan, estado;
+        `;
+
+        const result = await pool.query(query, [nombre, correo, telefono || null, direccion || null, empresaId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Empresa no encontrada.' });
+        }
+
+        const empresa = result.rows[0];
+        return res.status(200).json({
+            mensaje: 'Datos actualizados correctamente.',
+            data: {
+                id: empresa.id,
+                nombre: empresa.nombre,
+                correo: empresa.correo,
+                telefono: empresa.telefono,
+                direccion: empresa.direccion,
+                plan: empresa.plan,
+                estado: empresa.estado
+            }
+        });
+    } catch (error) {
+        console.error('updateTenantMe:', error.message);
+        res.status(500).json({ error: 'Error interno al actualizar los datos.' });
+    }
+};
+
+/**
+ * POST /api/tenants/change-password
+ * Cambia la contraseña del usuario autenticado
+ */
+const changePassword = async (req, res) => {
+    try {
+        const empresaId = req.empresaId;
+        if (!empresaId) {
+            return res.status(401).json({ error: 'No autenticado.' });
+        }
+
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Contraseña actual y nueva son obligatorias.' });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres.' });
+        }
+
+        // Obtener usuario del tenant
+        const userQuery = 'SELECT id, password_hash FROM usuarios WHERE empresa_id = $1 LIMIT 1;';
+        const userResult = await pool.query(userQuery, [empresaId]);
+
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuario no encontrado.' });
+        }
+
+        const usuario = userResult.rows[0];
+
+        // Verificar contraseña actual
+        const isPasswordValid = await bcrypt.compare(currentPassword, usuario.password_hash);
+        if (!isPasswordValid) {
+            return res.status(401).json({ error: 'Contraseña actual incorrecta.' });
+        }
+
+        // Encriptar nueva contraseña
+        const salt = await bcrypt.genSalt(10);
+        const newPasswordHash = await bcrypt.hash(newPassword, salt);
+
+        // Actualizar contraseña
+        const updateQuery = 'UPDATE usuarios SET password_hash = $1 WHERE id = $2;';
+        await pool.query(updateQuery, [newPasswordHash, usuario.id]);
+
+        return res.status(200).json({
+            mensaje: 'Contraseña cambiada exitosamente.'
+        });
+    } catch (error) {
+        console.error('changePassword:', error.message);
+        res.status(500).json({ error: 'Error interno al cambiar la contraseña.' });
+    }
+};
+
 module.exports = { 
     registerTenant, 
     loginTenant, 
     getTenantMe, 
     upgradePlan, 
     downgradePlan, 
-    getTenantUsage 
+    getTenantUsage,
+    updateTenantMe,
+    changePassword
 };

@@ -56,7 +56,7 @@ class CardProvider extends PaymentProvider {
 		return {
 			providerRefundId: `card_refund_${randomUUID()}`,
 			status: 'COMPLETED',
-			message: `Reembolso simulado para ${transactionId}`,
+			message: `Reembolso procesado para ${transactionId}`,
 			amount,
 		};
 	}

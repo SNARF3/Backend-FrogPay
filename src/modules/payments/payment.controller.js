@@ -12,7 +12,7 @@ const tenantModel = require('../tenants/tenant.model');
 
 // Nuevas importaciones para el manejo de tarjetas
 const { isLuhnValid, getCardNetwork } = require('../../utils/cardValidator');
-const { tokenizeCardMock } = require('../providers/stripe.mock');
+const { tokenizeCard } = require('../providers/card.tokenizer');
 const paypalProvider = require('../providers/paypal.provider');
 
 const SUPPORTED_PROVIDER_ACCOUNTS = {
@@ -22,12 +22,8 @@ const SUPPORTED_PROVIDER_ACCOUNTS = {
         requireApiKey: true,
         requireSecretKey: true,
     },
-    paypal_mock: {
-        type: 'wallet_mock',
-        requiredConfig: ['displayName', 'merchantEmail', 'merchantAccountId', 'settlementCurrency'],
-    },
-    card_simulated: {
-        type: 'card_mock',
+    card: {
+        type: 'card',
         requiredConfig: ['accountHolderName', 'settlementAccountAlias', 'supportEmail', 'acceptedBrands', 'statementDescriptor'],
     },
 };
@@ -88,7 +84,7 @@ function validateProviderAccountPayload(provider, body) {
     for (const field of spec.requiredConfig) {
         if (field === 'acceptedBrands') {
             if (!Array.isArray(config.acceptedBrands) || config.acceptedBrands.length === 0) {
-                throw new BusinessError('acceptedBrands es obligatorio para card_simulated', {
+                throw new BusinessError('acceptedBrands es obligatorio para card', {
                     code: 'PROVIDER_ACCOUNT_INVALID_PAYLOAD',
                     statusCode: 400,
                 });
@@ -104,7 +100,7 @@ function validateProviderAccountPayload(provider, body) {
         }
     }
 
-    if (provider === 'paypal_mock') {
+    if (provider === 'paypal') {
         const merchantEmail = String(config.merchantEmail || '');
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(merchantEmail)) {
             throw new BusinessError('merchantEmail no tiene formato válido', {
@@ -114,7 +110,7 @@ function validateProviderAccountPayload(provider, body) {
         }
     }
 
-    if (provider === 'card_simulated') {
+    if (provider === 'card') {
         const supportEmail = String(config.supportEmail || '');
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)) {
             throw new BusinessError('supportEmail no tiene formato válido', {
@@ -162,7 +158,7 @@ async function createPayment(req, res) {
 		const empresaId = req.empresaId;
 		const proveedor = req.body.proveedor || req.body.provider || req.body.paymentProvider
 			|| (String(req.body.payment_method || '').toUpperCase() === 'QR' ? 'qr' : null)
-			|| env.DEFAULT_PROVIDER || 'mock';
+            || env.DEFAULT_PROVIDER || 'card';
 		const monto = req.body.monto ?? req.body.amount;
         const monedaPreferida = await tenantModel.getTenantCurrencyPreference(empresaId);
         const moneda = String(req.body.moneda ?? req.body.currency ?? monedaPreferida ?? env.BASE_CURRENCY ?? 'USD').trim().toUpperCase();
@@ -370,13 +366,6 @@ function paymentHealthCheck(_req, res) {
     });
 }
 
-function getStripeConfig(_req, res) {
-    return res.status(200).json({
-        publishableKey: env.STRIPE_PUBLISHABLE_KEY || null,
-        enabled: Boolean(env.STRIPE_PUBLISHABLE_KEY),
-    });
-}
-
 async function getExchangeRate(req, res) {
     try {
         const { amount, fromCurrency, toCurrency } = req.query;
@@ -562,8 +551,8 @@ async function registerCard(req, res) {
 
         const network = getCardNetwork(cleanCardNumber);
 
-        // 3. Simular Tokenización con Stripe
-        const stripeResponse = await tokenizeCardMock({
+        // 3. Tokenización de tarjeta
+        const tokenizationResponse = await tokenizeCard({
             cardNumber: cleanCardNumber,
             expiry,
             cvc,
@@ -574,8 +563,8 @@ async function registerCard(req, res) {
         // 4. Guardar el Token Seguro en Base de Datos
         const savedCard = await cardModel.saveCardToken({
             empresaId: empresaId, // <--- Ahora sí, usa el ID real
-            tokenProveedor: stripeResponse.id, 
-            ultimosCuatro: stripeResponse.last4,
+            tokenProveedor: tokenizationResponse.id,
+            ultimosCuatro: tokenizationResponse.last4,
             red: network,
             tipo: cardType
         });
@@ -946,7 +935,6 @@ module.exports = {
     createPayPalOrder,
     capturePayPalOrder,
     paymentHealthCheck,
-    getStripeConfig,
 	getExchangeRate,
 	getPaymentsMonitor,
     getProviderAccounts,
