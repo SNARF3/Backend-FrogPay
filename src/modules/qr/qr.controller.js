@@ -33,7 +33,7 @@ function buildQrPage(payment) {
                 Cancelar Pago
             </button>
         </div>
-        <p style="margin-top:14px;font-size:12px;color:#9ca3af;">Escanea el QR con tu celular o usa los botones para simular el pago.</p>`
+        <p style="margin-top:14px;font-size:12px;color:#9ca3af;">Escanea el QR con tu celular o confirma la operación desde esta misma pantalla.</p>`
         : '';
 
     return `<!DOCTYPE html>
@@ -73,7 +73,7 @@ function buildQrPage(payment) {
         ${actionButtons}
         <div id="message"></div>
         <hr class="divider">
-        <div class="footer">Pagina de simulacion de pago. No realizar transacciones reales.</div>
+        <div class="footer">Canal QR seguro de FrogPay. Verifica siempre el monto y la moneda antes de confirmar.</div>
     </div>
     <script>
         const PAYMENT_ID = '${payment.id}';

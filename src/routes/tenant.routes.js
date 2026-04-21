@@ -6,7 +6,9 @@ const {
     getTenantMe, 
     upgradePlan, 
     downgradePlan,
-    getTenantUsage 
+    getTenantUsage,
+    updateTenantMe,
+    changePassword
 } = require('../modules/tenants/tenant.controller');
 const { authMiddleware } = require('../middlewares/auth.middleware');
 
@@ -16,6 +18,8 @@ router.post('/login', loginTenant);
 
 // Protected routes
 router.get('/me', authMiddleware, getTenantMe);
+router.put('/me', authMiddleware, updateTenantMe);
+router.post('/change-password', authMiddleware, changePassword);
 router.put('/upgrade', authMiddleware, upgradePlan);
 router.put('/downgrade', authMiddleware, downgradePlan);
 router.get('/usage', authMiddleware, getTenantUsage);

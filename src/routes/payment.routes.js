@@ -11,7 +11,6 @@ const {
     createPayPalOrder,
     capturePayPalOrder,
     paymentHealthCheck,
-    getStripeConfig,
 	getPaymentsMonitor,
     getProviderAccounts,
     upsertProviderAccount,
@@ -43,9 +42,6 @@ router.get('/cards', getCards);
 router.post('/paypal/create-order', createPayPalOrder);
 router.post('/paypal/capture-order', capturePayPalOrder);
 
-// 📌 Configuración pública para frontend (Stripe)
-router.get('/config/stripe', getStripeConfig);
-
 // 📌 Configuración de moneda operativa + tipo de cambio
 router.get('/currency-config', getCurrencyConfig);
 router.put('/currency-config', updateCurrencyConfig);
@@ -59,7 +55,7 @@ router.get('/monitor', getPaymentsMonitor);
 // 📌 Listado de transacciones para dashboard (HU-19)
 router.get('/', getPaymentsController);
 
-// 📌 Configuración de cuentas de cobro por tenant (mock/simulado)
+// 📌 Configuración de cuentas de cobro por tenant
 router.get('/provider-accounts', getProviderAccounts);
 router.put('/provider-accounts/:provider', upsertProviderAccount);
 

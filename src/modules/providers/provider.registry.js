@@ -1,7 +1,5 @@
-const mockProvider = require('./mock.provider');
 const paypalProvider = require('./paypal.provider');
 const cardProvider = require('./card.provider');
-const stripeProvider = require('./stripe.provider');
 const qrProvider = require('./qr.provider');
 const { BusinessError } = require('../../utils/errors');
 
@@ -14,7 +12,7 @@ class ProviderRegistry {
 		this.providers.set(String(name).toLowerCase(), provider);
 	}
 
-	resolve(name = 'mock') {
+	resolve(name = 'card') {
 		const key = String(name).toLowerCase();
 		const provider = this.providers.get(key);
 
@@ -37,10 +35,8 @@ class ProviderRegistry {
 const providerRegistry = new ProviderRegistry();
 
 // 📦 Registro de providers
-providerRegistry.register('mock', mockProvider);
 providerRegistry.register('paypal', paypalProvider);
 providerRegistry.register('card', cardProvider);
-providerRegistry.register('stripe', stripeProvider);
 providerRegistry.register('qr', qrProvider);
 
 module.exports = providerRegistry;
