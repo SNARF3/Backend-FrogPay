@@ -18,7 +18,7 @@ const authMiddleware = async (req, res, next) => {
                 
                 req.empresaId = decoded.empresaId;
                 req.usuarioId = decoded.usuarioId || decoded.sub; 
-                req.plan = decoded.plan || 'freemium';
+                req.plan = decoded.plan || 'FREEMIUM';
                 
                 if (!req.empresaId) {
                     return res.status(401).json({ error: "Token válido, pero sin empresa asignada." });
@@ -56,7 +56,7 @@ const authMiddleware = async (req, res, next) => {
         }
 
         req.empresaId = rows[0].id;
-        req.plan = rows[0].plan || 'freemium';
+        req.plan = rows[0].plan || 'FREEMIUM';
         next();
 
     } catch (error) {

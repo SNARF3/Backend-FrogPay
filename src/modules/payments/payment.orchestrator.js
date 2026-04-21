@@ -5,8 +5,10 @@ const paymentModel = require('./payment.model');
 const auditLogger = require('../../utils/auditLogger');
 const env = require('../../config/env');
 
+const { checkMonthlyVolumeLimit } = require('../../common/limits');
+
 function getMonthlyLimitByPlan(plan) {
-  if (plan === 'pro') return Number.POSITIVE_INFINITY;
+  if (plan === 'PREMIUM') return Number.POSITIVE_INFINITY;
   return env.FREE_MONTHLY_TX_LIMIT;
 }
 
@@ -16,6 +18,8 @@ class PaymentOrchestrator {
 		const empresaId = context.empresaId;
 		const providerName = context.proveedor;
 		const plan = context.plan || (await paymentModel.getCompanyPlan(empresaId));
+		
+		// 1. Verificar límite por número de transacciones (Existente)
 		const usage = await paymentModel.getMonthlyUsage(empresaId);
 		const limit = getMonthlyLimitByPlan(plan);
 
@@ -23,11 +27,27 @@ class PaymentOrchestrator {
 			throw new BusinessError('Tu plan actual alcanzó el límite mensual de transacciones.', {
 				code: 'PLAN_LIMIT_EXCEEDED',
 				statusCode: 402,
+				details: { plan, limit, current: usage.total_transacciones },
+			});
+		}
+
+		// 2. Verificar límite por volumen de dinero (Nueva lógica de $50,000 USD)
+		const volumeCheck = await checkMonthlyVolumeLimit({
+			empresaId,
+			plan,
+			newAmountUSD: context.payment.monto // context.payment.monto ya viene en USD base del controlador
+		});
+
+		if (!volumeCheck.allowed) {
+			throw new BusinessError('Transacción rechazada. Has superado el límite mensual de $50,000 USD para el plan FREEMIUM.', {
+				code: 'VOLUME_LIMIT_EXCEEDED',
+				statusCode: 402,
 				details: {
 					plan,
-					limit,
-					current: usage.total_transacciones,
-				},
+					limit: volumeCheck.limitUSD,
+					current: volumeCheck.currentVolumeUSD,
+					projected: volumeCheck.projectedVolumeUSD
+				}
 			});
 		}
 

@@ -36,7 +36,7 @@ const publicRateLimit = createMemoryRateLimiter({
 
 const tenantRateLimit = createMemoryRateLimiter({
 	windowMs: env.RATE_LIMIT_WINDOW_MS,
-	getLimit: (req) => (req.plan === 'pro' ? env.RATE_LIMIT_PRO_MAX : env.RATE_LIMIT_FREE_MAX),
+	getLimit: (req) => (req.plan === 'PREMIUM' ? env.RATE_LIMIT_PRO_MAX : env.RATE_LIMIT_FREE_MAX),
 	getKey: (req) => `tenant:${req.empresaId || 'unknown'}`,
 	message: 'Límite de solicitudes por empresa excedido.',
 });
