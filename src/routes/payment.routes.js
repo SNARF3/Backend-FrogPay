@@ -6,7 +6,6 @@ const {
     createPayment,
     refundPayment,
     getPaymentStatus,
-    getPaymentById,
     registerCard,
     getCards,
     createPayPalOrder,
@@ -23,6 +22,10 @@ const {
     handlePaypalReturn,
     handlePaypalCancel,
 } = require('../modules/payments/payment.controller');
+const {
+    getPaymentsController,
+    getPaymentDetailController,
+} = require('../modules/finances/finance.controller');
 
 // 📌 Callbacks públicos de PayPal (sin auth — redirigidos por PayPal tras aprobación)
 router.get('/paypal/return', handlePaypalReturn);
@@ -53,6 +56,9 @@ router.get('/health-check', paymentHealthCheck);
 // 📌 Monitor de pagos + estado de entrega de webhooks
 router.get('/monitor', getPaymentsMonitor);
 
+// 📌 Listado de transacciones para dashboard (HU-19)
+router.get('/', getPaymentsController);
+
 // 📌 Configuración de cuentas de cobro por tenant (mock/simulado)
 router.get('/provider-accounts', getProviderAccounts);
 router.put('/provider-accounts/:provider', upsertProviderAccount);
@@ -72,7 +78,7 @@ router.post('/:transactionId/refund', refundPayment);
 // 📌 Estado del pago
 router.get('/:transactionId/status', getPaymentStatus);
 
-// 📌 Consulta de pago por ID interno (polling QR)
-router.get('/:id', getPaymentById);
+// 📌 Consulta detallada de pago por ID
+router.get('/:id', getPaymentDetailController);
 
 module.exports = router;
