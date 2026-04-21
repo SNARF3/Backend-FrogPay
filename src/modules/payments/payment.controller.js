@@ -24,7 +24,7 @@ const SUPPORTED_PROVIDER_ACCOUNTS = {
     },
     card: {
         type: 'card',
-        requiredConfig: ['accountHolderName', 'settlementAccountAlias', 'supportEmail', 'acceptedBrands', 'statementDescriptor'],
+        requiredConfig: ['statementDescriptor'],
     },
 };
 
@@ -100,7 +100,7 @@ function validateProviderAccountPayload(provider, body) {
         }
     }
 
-    if (provider === 'paypal') {
+    if (provider === 'paypal' && config.merchantEmail) {
         const merchantEmail = String(config.merchantEmail || '');
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(merchantEmail)) {
             throw new BusinessError('merchantEmail no tiene formato válido', {
@@ -110,7 +110,7 @@ function validateProviderAccountPayload(provider, body) {
         }
     }
 
-    if (provider === 'card') {
+    if (provider === 'card' && config.supportEmail) {
         const supportEmail = String(config.supportEmail || '');
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail)) {
             throw new BusinessError('supportEmail no tiene formato válido', {
